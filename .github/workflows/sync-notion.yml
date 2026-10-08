@@ -1,0 +1,28 @@
+# 每天自動從 Notion 同步一次珠子資料（也順便讓 Supabase 免費專案保持活躍，不會因 7 天沒動靜被暫停）
+# 需要在 Repo → Settings → Secrets and variables → Actions 新增：
+#   SUPABASE_FUNCTIONS_URL  例：https://abcdefghijkl.supabase.co/functions/v1
+#   SYNC_SECRET             跟 Supabase secrets 裡的 SYNC_SECRET 相同
+# 也可以到 Actions 分頁手動按「Run workflow」立即同步。
+name: Sync Notion catalog
+on:
+  schedule:
+    - cron: "0 19 * * *"   # 每天台灣時間 03:00
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "全部重抓（忽略未變更的頁面）"
+        type: boolean
+        default: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call sync-notion
+        env:
+          URL: ${{ secrets.SUPABASE_FUNCTIONS_URL }}
+          SECRET: ${{ secrets.SYNC_SECRET }}
+          FULL: ${{ inputs.full && '1' || '0' }}
+        run: |
+          code=$(curl -sS -o out.json -w '%{http_code}' -X POST "$URL/sync-notion?full=$FULL" -H "x-sync-secret: $SECRET")
+          cat out.json
+          test "$code" = "200"

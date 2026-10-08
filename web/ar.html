@@ -1,0 +1,1203 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>串珠盤 AR 測試版</title>
+<style>
+:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0} img{max-width:100%} [hidden]{display:none!important}
+</style>
+<script src="config.js"></script>
+</head>
+<body>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500&family=Noto+Serif+TC:wght@500;600&display=swap">
+<style>
+/* Layout: one-screen app — velvet stage with three views (散盤 / 串珠盤 / 戴上看) on top, material drawer below; side by side on desktop */
+:root{
+  --bg:#eceee9; --surface:#f7f8f5; --fg:#1c2523; --muted:#66716c; --line:#d2d7d1;
+  --accent:#8f6b2a; --accent-soft:#efe5d2; --danger:#a33b2f;
+  --velvet-1:#1d3c39; --velvet-2:#0d2120;
+  --f-display:"Noto Serif TC","Songti TC",serif;
+  --f-body:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  --f-num:"IBM Plex Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0f1514; --surface:#18201e; --fg:#e4e9e6; --muted:#93a09a; --line:#2b3633;
+  --accent:#cfa75c; --accent-soft:#2c271b; --danger:#e07a6b; color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#0f1514; --surface:#18201e; --fg:#e4e9e6; --muted:#93a09a; --line:#2b3633;
+  --accent:#cfa75c; --accent-soft:#2c271b; --danger:#e07a6b; color-scheme:dark }
+
+html,body{height:100%}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:14px;overflow:hidden}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.app{height:100%;display:grid;grid-template-rows:auto auto auto 1fr;grid-template-areas:"head" "stage" "sel" "panel";padding-inline:16px;gap:10px;box-sizing:border-box;padding-block:10px 0}
+.head{grid-area:head;display:flex;flex-direction:column;gap:8px;min-width:0}
+.total{display:flex;flex-direction:column;align-items:flex-start;gap:0;min-width:0;line-height:1.15}
+.price{font-family:var(--f-num);font-size:24px;font-weight:500;letter-spacing:-.01em;font-variant-numeric:tabular-nums;white-space:nowrap}
+.count{color:var(--muted);font-size:13px;white-space:nowrap}
+.top{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
+.acts{display:flex;gap:6px;flex:none}
+.views{display:flex;border:1px solid var(--line);border-radius:3px;overflow:hidden;min-width:0}
+.view{flex:1;background:var(--surface);border:0;border-left:1px solid var(--line);padding:8px 4px;font-family:var(--f-display);font-weight:500;letter-spacing:.06em;white-space:nowrap;color:var(--muted)}
+.view:first-child{border-left:0}
+.view[aria-selected="true"]{background:var(--fg);color:var(--bg)}
+.act{display:flex;align-items:center;gap:5px;border:1px solid var(--accent);background:transparent;color:var(--accent);padding:7px 10px;border-radius:3px;font-family:var(--f-display);font-weight:600;font-size:13px;letter-spacing:.04em;white-space:nowrap}
+.act.solid{background:var(--accent);color:var(--surface)}
+.act:disabled{opacity:.4;cursor:default}
+.act svg{width:15px;height:15px;flex:none}
+
+.stage{grid-area:stage;position:relative;height:min(calc(100vw - 32px),48svh);background:radial-gradient(ellipse at 50% 40%,var(--velvet-1),var(--velvet-2) 75%);border-radius:4px;display:grid;place-items:center;overflow:hidden}
+.stage canvas{display:block;touch-action:none;grid-area:1/1}
+.tool{position:absolute;display:flex;gap:6px;z-index:2}
+.tool.tr{top:10px;right:10px}
+.stage[data-mode="wear"] .tool.tr{flex-direction:column}
+.tool.tl{top:10px;left:10px;align-items:center}
+.tool.bl{bottom:10px;left:10px;right:10px;justify-content:space-between;align-items:flex-end;pointer-events:none}
+.tool.bl>*{pointer-events:auto}
+.ibtn{width:36px;height:36px;display:grid;place-items:center;background:rgba(6,18,17,.55);border:1px solid rgba(220,200,150,.25);color:#e8dcc0;border-radius:2px}
+.ibtn:disabled{opacity:.35;cursor:default}
+.ibtn svg{width:18px;height:18px}
+.wrist{display:flex;align-items:center;gap:6px;background:rgba(6,18,17,.55);border:1px solid rgba(220,200,150,.25);color:#e8dcc0;padding:0 4px 0 10px;height:36px;border-radius:2px;font-size:12px}
+.wrist select{background:transparent;color:#f3e8cc;border:0;font-family:var(--f-num);font-size:13px;padding:4px 2px}
+.wrist select option{color:#1c2523;background:#fff}
+.wrist .sep{width:1px;height:16px;background:rgba(220,200,150,.3)}
+.tones{display:flex;gap:6px;background:rgba(6,18,17,.6);border:1px solid rgba(220,200,150,.2);padding:6px 8px;border-radius:2px;align-items:center}
+.tone{width:20px;height:20px;border-radius:50%;border:1px solid rgba(255,255,255,.35);padding:0}
+.tone[aria-pressed="true"]{box-shadow:0 0 0 2px #0d2120,0 0 0 3.5px #d8b25e}
+.tones .th{color:#d9cdb0;font-size:11px;margin-left:4px;white-space:nowrap}
+.w3msg{position:absolute;top:56px;left:50%;transform:translateX(-50%);max-width:calc(100% - 32px);text-align:center;color:#efe3c4;font-size:12px;pointer-events:none;z-index:2;background:rgba(6,18,17,.7);border:1px solid rgba(220,200,150,.2);padding:5px 10px;border-radius:2px}
+.len{background:rgba(6,18,17,.6);border:1px solid rgba(220,200,150,.25);color:#efe3c4;padding:6px 10px;border-radius:2px;display:flex;flex-direction:column;gap:1px;margin-left:auto;text-align:right}
+.len b{font-family:var(--f-display);font-weight:500;font-size:15px;letter-spacing:.04em}
+.len b.ok{color:#bfe0a0}.len b.over{color:#f0a894}
+.len small{font-family:var(--f-num);font-size:11px;color:#b9ad90}
+.hint{color:#d9cdb0;font-size:11px;max-width:12em;line-height:1.4;background:rgba(6,18,17,.6);border:1px solid rgba(220,200,150,.2);padding:5px 8px;border-radius:2px}
+
+.sel{grid-area:sel;display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);padding:8px 10px;border-radius:3px;min-width:0}
+.sel .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sel .nm span{color:var(--muted);font-family:var(--f-num);font-size:12px;margin-left:6px}
+.sel button{border:1px solid var(--line);background:transparent;padding:5px 10px;border-radius:2px;font-size:13px}
+.sel button.rm{border-color:var(--danger);color:var(--danger)}
+
+.panel{grid-area:panel;min-height:0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-bottom:0;border-radius:4px 4px 0 0}
+.filters{display:flex;flex-direction:column;gap:8px;padding:10px 12px 8px;border-bottom:1px solid var(--line)}
+.tabs{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}
+.tab{background:transparent;border:0;border-bottom:2px solid transparent;padding:6px 10px;color:var(--muted);letter-spacing:.12em;white-space:nowrap;font-family:var(--f-display);font-weight:500}
+.tab[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent)}
+.dots{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:2px}
+.dot{width:26px;height:26px;border-radius:50%;border:1px solid rgba(0,0,0,.15);flex:none}
+.dot[aria-pressed="true"]{box-shadow:0 0 0 2px var(--surface),0 0 0 3.5px var(--accent)}
+.dot.all{background:conic-gradient(#a9c76a,#e2c25c,#efb3bd,#a985c4,#9fc7d8,#e9eeec,#a9c76a)}
+.grid{flex:1;min-height:0;overflow-y:auto;padding:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;align-content:start;padding-bottom:calc(12px + env(safe-area-inset-bottom,0px))}
+.card{position:relative}
+.card .add{width:100%;height:100%;background:var(--bg);border:1px solid var(--line);border-radius:3px;padding:8px 6px 10px;display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center}
+.card .add:active{transform:scale(.97)}
+.card .info{position:absolute;top:5px;left:5px;width:24px;height:24px;border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--muted);font-family:var(--f-display);font-weight:600;font-size:12px;display:grid;place-items:center;padding:0}
+.card img{object-fit:contain}
+.card img{width:64px;height:64px}
+.card .n{font-family:var(--f-display);font-weight:500;font-size:13px;line-height:1.3}
+.card .s{font-family:var(--f-num);font-size:11px;color:var(--muted)}
+.card .p{font-family:var(--f-num);font-size:12px}
+.card .b{position:absolute;top:5px;right:5px;pointer-events:none;min-width:18px;height:18px;padding:0 5px;box-sizing:border-box;border-radius:9px;background:var(--accent);color:var(--surface);font-family:var(--f-num);font-size:11px;display:grid;place-items:center}
+.empty{grid-column:1/-1;color:var(--muted);padding:24px 8px;text-align:center}
+
+@media (min-width:860px){
+  .app{grid-template-columns:1fr 400px;grid-template-rows:auto 1fr auto;grid-template-areas:"head panel" "stage panel" "sel panel";padding-block:16px;column-gap:20px}
+  .stage{height:auto;min-height:0}
+  .panel{border-bottom:1px solid var(--line);border-radius:4px}
+  .price{font-size:28px}
+}
+@media (prefers-reduced-motion: reduce){ .card .add:active{transform:none} }
+.viewrow{display:flex;gap:6px;min-width:0}
+.viewrow .views{flex:1}
+.act.done{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+
+/* bottom sheets: bead info, export */
+.sheet{position:fixed;inset:0;z-index:50;display:flex;align-items:flex-end;justify-content:center}
+.sheet-back{position:absolute;inset:0;background:rgba(8,14,13,.55)}
+.sheet-card{position:relative;background:var(--surface);color:var(--fg);width:100%;max-width:560px;max-height:90%;overflow-y:auto;border-radius:12px 12px 0 0;padding:22px 20px calc(22px + env(safe-area-inset-bottom,0px));box-sizing:border-box;display:flex;flex-direction:column;gap:16px}
+.sheet-card>*{flex:none}
+.sheet-x{position:absolute;top:8px;right:8px;width:40px;height:40px;border:0;background:transparent;font-size:24px;line-height:1;color:var(--muted)}
+.gal{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin-inline:-4px;padding-inline:4px}
+.gal img{width:136px;height:136px;flex:none;border-radius:4px;background:radial-gradient(ellipse at 50% 40%,var(--velvet-1),var(--velvet-2) 80%);object-fit:contain;padding:10px;box-sizing:border-box}
+.info-head h2{font-family:var(--f-display);font-weight:600;font-size:24px;margin:0;letter-spacing:.04em;text-wrap:balance}
+.info-head .meta{font-family:var(--f-num);color:var(--muted);font-size:13px;margin-top:4px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12px;padding:3px 9px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+.props{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;margin:0;font-size:14px;border-block:1px solid var(--line);padding-block:12px}
+.props dt{color:var(--muted)} .props dd{margin:0;min-width:0}
+.blk h3{font-family:var(--f-display);font-weight:600;font-size:15px;letter-spacing:.08em;margin:0 0 6px}
+.md{line-height:1.8;font-size:14px;max-width:65ch}
+.md p{margin:.3em 0} .md ul{margin:.3em 0;padding-left:1.2em} .md h4{margin:.8em 0 .2em;font-size:14px}
+.sheet .primary{width:100%;padding:12px;border:0;border-radius:4px;background:var(--accent);color:var(--surface);font-family:var(--f-display);font-weight:600;font-size:16px;letter-spacing:.1em}
+.sheet .secondary{flex:1;padding:11px;border:1px solid var(--line);border-radius:4px;background:transparent;font-size:14px}
+.devbox{border:1px dashed var(--line);border-radius:4px;padding:12px;font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:8px}
+.devbox input{font-size:13px;max-width:100%}
+.note{font-size:12px;color:var(--muted)}
+.exp-img{width:100%;border-radius:4px;border:1px solid var(--line);display:block}
+.exp-btns{display:flex;gap:8px;flex-wrap:wrap}
+.exp-text{width:100%;box-sizing:border-box;min-height:150px;font-family:var(--f-num);font-size:12px;line-height:1.6;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:10px;resize:vertical}
+@media (min-width:860px){ .sheet{align-items:center} .sheet-card{border-radius:8px} }
+</style>
+
+<div class="app">
+  <header class="head">
+    <div class="top">
+      <div class="total">
+        <span class="price" id="price">NT$0</span>
+        <span class="count" id="count">0 顆</span>
+      </div>
+      <div class="acts">
+        <button class="act" id="shuffleBtn" title="把現有的珠子打亂順序串起來"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h3.5c2 0 3.2 1 4.3 2.7l2.4 4.6C14.3 16 15.5 17 17.5 17H21M18 14l3 3-3 3M3 17h3.5c1.4 0 2.4-.5 3.2-1.4M14.3 8.4c.8-.9 1.8-1.4 3.2-1.4H21M18 4l3 3-3 3"/></svg>隨機串珠</button>
+        <button class="act solid" id="randBtn" title="自動挑選搭配的素材，湊成一條手串"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1.2" fill="currentColor"/><circle cx="15" cy="15" r="1.2" fill="currentColor"/><circle cx="15" cy="9" r="1.2" fill="currentColor"/><circle cx="9" cy="15" r="1.2" fill="currentColor"/></svg>隨機選珠</button>
+      </div>
+    </div>
+    <div class="viewrow">
+    <div class="views" role="tablist" aria-label="檢視">
+      <button class="view" role="tab" id="v-dish" data-mode="dish" aria-selected="true">散盤</button>
+      <button class="view" role="tab" id="v-board" data-mode="board" aria-selected="false">串珠盤</button>
+      <button class="view" role="tab" id="v-wear" data-mode="wear" aria-selected="false">戴上看</button>
+    </div>
+    <button class="act done" id="doneBtn" title="輸出設計單：快照、價格、顆數、明細">完成</button>
+    </div>
+  </header>
+
+  <section class="stage" id="stage" aria-label="串珠工作區">
+    <canvas id="gl" hidden></canvas>
+    <canvas id="cv"></canvas>
+    <div class="w3msg" id="w3msg" hidden></div>
+    <div class="tool tl">
+      <label class="wrist" for="wrist">手圍
+        <select id="wrist">
+          <option value="13">13 cm</option><option value="14">14 cm</option><option value="15">15 cm</option>
+          <option value="16" selected>16 cm</option><option value="17">17 cm</option><option value="18">18 cm</option><option value="19">19 cm</option>
+        </select>
+        <span class="sep"></span>
+        <select id="fit" aria-label="鬆緊">
+          <option value="-5">貼手</option><option value="0" selected>標準</option><option value="5">寬鬆</option>
+        </select>
+      </label>
+    </div>
+    <div class="tool tr">
+      <button class="ibtn" id="undoBtn" aria-label="復原" title="復原"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+      <button class="ibtn" id="shakeBtn" aria-label="搖散" title="搖散"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="9" r="3"/><circle cx="16" cy="15" r="3"/><circle cx="16.5" cy="6.5" r="1.6"/><path d="M3 17c1.5 1.5 3 1.5 4.5 0M17 21c1.2-.8 2.4-.8 3.6 0"/></svg></button>
+      <button class="ibtn" id="flipBtn" aria-label="翻面" title="翻面（手背／手掌）" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 13.7-5.6L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15"/><path d="M4 20v-5h5"/></svg></button>
+      <button class="ibtn" id="centerBtn" aria-label="視角置中" title="視角置中" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></button>
+      <button class="ibtn" id="clearBtn" aria-label="清空" title="清空"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
+    </div>
+    <div class="tool bl">
+      <span class="hint" id="hint"></span>
+      <div class="tones" id="tones" hidden></div>
+      <div class="len" aria-live="polite"><b id="lenMain">還差約 0 mm</b><small id="lenSub">目標 175 mm</small></div>
+    </div>
+  </section>
+
+  <div class="sel" id="sel" hidden>
+    <span class="nm" id="selName"></span>
+    <button id="selCancel">取消</button>
+    <button class="rm" id="selRemove">移除</button>
+  </div>
+
+  <section class="panel" aria-label="素材">
+    <div class="filters">
+      <div class="tabs" role="tablist" id="tabs"></div>
+      <div class="dots" id="dots"></div>
+    </div>
+    <div class="grid" id="grid"></div>
+  </section>
+</div>
+
+<div class="sheet" id="infoSheet" hidden role="dialog" aria-modal="true" aria-labelledby="infoTitle">
+  <div class="sheet-back" data-close></div>
+  <div class="sheet-card">
+    <button class="sheet-x" data-close aria-label="關閉">×</button>
+    <div class="gal" id="infoGal"></div>
+    <div class="info-head"><h2 id="infoTitle"></h2><div class="meta" id="infoMeta"></div></div>
+    <div class="chips" id="infoChips"></div>
+    <dl class="props" id="infoProps"></dl>
+    <div id="infoBlocks" style="display:flex;flex-direction:column;gap:16px"></div>
+    <button class="primary" id="infoAdd">加入盤中</button>
+    <div class="devbox">
+      <label for="photoInput">試用實拍照片（最多 3 張，每顆珠子會隨機用其中一張）</label>
+      <input type="file" id="photoInput" accept="image/*" multiple>
+      <span>只在這台裝置暫時預覽，重新整理就會消失。部署後這裡會改成上傳到後端。照片請用去背 PNG、正方形、珠子置中並佔畫面寬度約 90%。</span>
+    </div>
+    <p class="note">介紹文字為範例內容，上線前請換成你的商品資料。</p>
+  </div>
+</div>
+
+<div class="sheet" id="expSheet" hidden role="dialog" aria-modal="true" aria-labelledby="expTitle">
+  <div class="sheet-back" data-close></div>
+  <div class="sheet-card">
+    <button class="sheet-x" data-close aria-label="關閉">×</button>
+    <div class="info-head"><h2 id="expTitle">設計單</h2><div class="meta">長按圖片即可儲存</div></div>
+    <img class="exp-img" id="expImg" alt="手串設計單">
+    <div class="exp-btns">
+      <button class="secondary" id="copyBtn">複製文字明細</button>
+      <button class="secondary" id="submitBtn" hidden>送出訂單</button>
+    </div>
+    <label class="note" for="expText">文字明細（可貼到 LINE）</label>
+    <textarea class="exp-text" id="expText" readonly></textarea>
+    <p class="note" id="expNote"></p>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+<script>
+(() => {
+const { Engine, Bodies, Body, Composite, Events, Constraint, Runner } = Matter;
+const TAU = Math.PI * 2, DISH_MM = 112, TOL_MM = 3;
+const dpr = Math.min(window.devicePixelRatio || 1, 3);
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- backend hooks ----------
+   Deployed: web/config.js sets window.BEAD_CONFIG = { apiBase: 'https://<ref>.supabase.co/functions/v1/api' }.
+   Endpoints (supabase/functions/api):
+     GET  {apiBase}/catalog  → [{id, name, cat, kind, d, w, price, color, images:[url…], info:{…}}]
+                               synced from Notion; replaces the built-in sample catalog
+     POST {apiBase}/orders   ← buildOrder() JSON; prices are re-checked on the server → {id}
+   Without apiBase everything runs from the built-in sample catalog below. */
+const CONFIG = Object.assign({ apiBase:null, photoFill:.9, variants:3 }, window.BEAD_CONFIG||{});
+const DataSource = {
+  async loadCatalog(){ const r=await fetch(CONFIG.apiBase+'/catalog'); if(!r.ok) throw new Error('catalog '+r.status); return r.json(); },
+  async submitOrder(order){
+    const r=await fetch(CONFIG.apiBase+'/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(order)});
+    if(!r.ok) throw new Error('送出失敗（'+r.status+'）'); return r.json(); },
+};
+
+/* ---------- catalog ---------- */
+const GOLD = ['#57400f','#b48728','#f7e3a0','#d2a43f','#664711'];
+const SILV = ['#45494d','#999fa5','#f3f5f7','#b6bbc0','#53575b'];
+const ITEMS = [
+  {id:'rut10', name:'綠髮晶', cat:'bead', kind:'gem', d:10, price:88, color:'green', p:{base:[178,206,170],clear:.72,glow:[230,250,220],incl:'rutile',ic:[38,66,42]}},
+  {id:'rut8',  name:'綠髮晶', cat:'bead', kind:'gem', d:8,  price:58, color:'green', p:{base:[178,206,170],clear:.72,glow:[230,250,220],incl:'rutile',ic:[38,66,42]}},
+  {id:'peri8', name:'橄欖石', cat:'bead', kind:'gem', d:8,  price:65, color:'green', p:{base:[146,196,46],clear:.55,glow:[228,255,130]}},
+  {id:'clr8',  name:'白水晶', cat:'bead', kind:'gem', d:8,  price:25, color:'clear', p:{base:[226,233,233],clear:.92,glow:[255,255,255]}},
+  {id:'clr10', name:'白水晶', cat:'bead', kind:'gem', d:10, price:35, color:'clear', p:{base:[226,233,233],clear:.92,glow:[255,255,255]}},
+  {id:'moon8', name:'月光石', cat:'bead', kind:'gem', d:8,  price:70, color:'clear', p:{base:[230,230,224],clear:.25,glow:[255,255,255],adu:true,incl:'cloud'}},
+  {id:'rose8', name:'粉晶',   cat:'bead', kind:'gem', d:8,  price:35, color:'pink',  p:{base:[240,184,196],clear:.32,glow:[255,225,232],incl:'cloud'}},
+  {id:'straw8',name:'草莓晶', cat:'bead', kind:'gem', d:8,  price:60, color:'pink',  p:{base:[246,212,210],clear:.62,glow:[255,240,240],incl:'dots',ic:[196,38,48]}},
+  {id:'ame8',  name:'紫水晶', cat:'bead', kind:'gem', d:8,  price:45, color:'purple',p:{base:[150,94,186],clear:.5,glow:[225,190,255],incl:'band',ic:[88,40,128]}},
+  {id:'aqua8', name:'海藍寶', cat:'bead', kind:'gem', d:8,  price:80, color:'blue',  p:{base:[168,210,226],clear:.66,glow:[230,248,255],incl:'cloud'}},
+  {id:'cit8',  name:'黃水晶', cat:'bead', kind:'gem', d:8,  price:42, color:'yellow',p:{base:[236,188,78],clear:.6,glow:[255,238,170]}},
+  {id:'gmoon8',name:'灰月光', cat:'bead', kind:'gem', d:8,  price:55, color:'grey',  p:{base:[118,124,128],clear:.2,glow:[200,210,220],adu:true}},
+  {id:'obs8',  name:'黑曜石', cat:'bead', kind:'gem', d:8,  price:30, color:'black', p:{base:[34,33,36],clear:0,glow:[90,90,100]}},
+  {id:'pearl7',name:'淡水珍珠',cat:'bead',kind:'pearl',d:7, price:40, color:'clear'},
+  {id:'spG',   name:'金色隔片', cat:'spacer', kind:'spacer', d:5, w:2,   price:9,  color:'yellow', tone:GOLD},
+  {id:'spS',   name:'銀色隔片', cat:'spacer', kind:'spacer', d:5, w:2,   price:9,  color:'grey',   tone:SILV},
+  {id:'spGem', name:'鑲鑽隔片', cat:'spacer', kind:'spacer', d:6, w:1.6, price:30, color:'clear',  tone:SILV, variant:'gem'},
+  {id:'spWave',name:'金色波紋隔片',cat:'spacer',kind:'spacer',d:9, w:2.5, price:15, color:'yellow', tone:GOLD, variant:'wave'},
+  {id:'ballG3',name:'金色小圓珠',cat:'ball', kind:'metal', d:3, price:8,  color:'yellow', tone:GOLD},
+  {id:'ballS3',name:'銀色小圓珠',cat:'ball', kind:'metal', d:3, price:8,  color:'grey',   tone:SILV},
+  {id:'ballG4',name:'金色圓珠',  cat:'ball', kind:'metal', d:4, price:12, color:'yellow', tone:GOLD},
+];
+/* Product write-ups (sample copy — replace with your own). Markdown: paragraphs, - lists, **bold**, ### headings. */
+const INFO = {
+  rut:{origin:'巴西',grade:'A（髮絲清晰、綠色均勻）',months:[],tags:['髮晶','綠色系'],
+    price:'- 依直徑計價，10mm 用料約為 8mm 的兩倍\n- 髮絲越密、顏色越綠，等級越高\n- 無明顯裂紋與雜質者為 A 級',
+    story:'綠髮晶是石英在生長時包進了細長的陽起石或電氣石礦物，形成像髮絲一樣的綠色針狀內含物。每一顆的髮絲走向都不同，沒有兩顆長得一樣。',
+    meaning:'傳統上被視為帶來事業運與行動力的石頭，常用來象徵「開創」。'},
+  peri:{origin:'巴基斯坦、中國、美國亞利桑那',grade:'A（透亮、黃綠色飽和）',months:[8],tags:['八月生日石','綠色系'],
+    price:'- 單顆計價\n- 顏色越飽和、內含物越少，價格越高',
+    story:'橄欖石來自地球深處的上部地函，被火山活動帶到地表，也曾在隕石中被發現。古埃及人稱它為「太陽的寶石」。',
+    meaning:'八月的生日石，寓意光明與正向能量。'},
+  clr:{origin:'巴西',grade:'A（通透無雲霧）',months:[],tags:['百搭','透明'],
+    price:'- 單顆計價，價格最親民\n- 通透度越高、內含物越少越貴',
+    story:'白水晶是最純粹的石英結晶，常被拿來和各種水晶搭配，能讓整串的顏色更有層次。',
+    meaning:'常被稱為「水晶之王」，寓意淨化與專注。'},
+  moon:{origin:'印度、斯里蘭卡',grade:'A（可見藍光暈彩）',months:[6],tags:['六月生日石','暈彩'],
+    price:'- 依暈彩明顯程度分級\n- 藍光越強、底色越乾淨越貴',
+    story:'月光石轉動時表面會浮出一層柔和的光，叫做「月光效應」，來自內部長石層狀結構對光的散射。',
+    meaning:'六月的生日石之一，傳說與月亮和直覺有關，寓意溫柔與守護。'},
+  rose:{origin:'巴西、馬達加斯加',grade:'A（粉色均勻、微透）',months:[],tags:['粉色系','人緣'],
+    price:'- 單顆計價\n- 顏色越粉嫩、越透亮越貴',
+    story:'粉晶的粉色來自微量的礦物內含物，質地常帶有柔霧感，是最受歡迎的水晶之一。',
+    meaning:'常與愛情和人緣連結，寓意溫柔與自我疼愛。'},
+  straw:{origin:'哈薩克、巴西',grade:'A（紅點分布均勻）',months:[],tags:['粉色系','點狀內含物'],
+    price:'- 單顆計價\n- 紅色內含物越明顯、分布越平均越貴',
+    story:'草莓晶是含有紅色鐵礦物（如赤鐵礦、針鐵礦）內含物的石英，看起來像草莓表面的小籽。',
+    meaning:'寓意甜美與好人緣。'},
+  ame:{origin:'巴西、烏拉圭',grade:'A（紫色飽和、條紋清楚）',months:[2],tags:['二月生日石','紫色系'],
+    price:'- 單顆計價\n- 紫色越深越飽和，價格越高',
+    story:'紫水晶的紫色來自石英中的微量鐵元素與天然輻射。古希臘人相信它能讓人保持清醒。',
+    meaning:'二月的生日石，寓意智慧與冷靜。'},
+  aqua:{origin:'巴西、巴基斯坦',grade:'A（淡藍通透）',months:[3],tags:['三月生日石','藍色系'],
+    price:'- 單顆計價\n- 藍色越明顯、越透越貴',
+    story:'海藍寶屬於綠柱石家族，名字來自拉丁文的「海水」。傳說是航海者的護身石。',
+    meaning:'三月的生日石，寓意勇氣與平安。'},
+  cit:{origin:'巴西',grade:'A（金黃通透）',months:[11],tags:['十一月生日石','黃色系'],
+    price:'- 單顆計價\n- 市面上不少黃水晶由紫水晶加熱而成，天然黃水晶價格較高，請在此註明你的貨源',
+    story:'黃水晶是帶有金黃色調的石英，色澤溫暖明亮。',
+    meaning:'十一月的生日石之一，常被稱為「商人之石」，寓意財富與自信。'},
+  gmoon:{origin:'印度',grade:'A（灰底帶藍光）',months:[6],tags:['六月生日石','暈彩'],
+    price:'- 依暈彩明顯程度分級',
+    story:'灰月光是底色偏灰的月光石，暈彩在深色底上更明顯，風格比白月光沉穩。',
+    meaning:'寓意內斂與穩定。'},
+  obs:{origin:'墨西哥',grade:'A（黑亮無裂）',months:[],tags:['黑色系','百搭'],
+    price:'- 單顆計價，價格親民',
+    story:'黑曜石是火山熔岩快速冷卻形成的天然玻璃，不是結晶礦物。斷口非常銳利，古代曾被做成刀具。',
+    meaning:'常被視為守護石，寓意穩定與避邪。'},
+  pearl:{origin:'中國（淡水養殖）',grade:'A（光澤好、近圓）',months:[6],tags:['六月生日石','有機寶石'],
+    price:'- 依圓度、光澤、瑕疵分級\n- 越圓、光澤越強越貴',
+    story:'淡水珍珠由河蚌在淡水中培育，形狀多半不是正圓，每顆都有自己的樣子。',
+    meaning:'六月的生日石，寓意純潔與溫柔。'},
+  metal:{origin:'—',grade:'電鍍（請填實際材質，如 925 銀、14K 包金）',months:[],tags:['配件'],
+    price:'- 單顆計價\n- 實際價格依材質而定（合金、925 銀、包金差異很大）',
+    story:'隔片與隔珠用來分隔主珠，讓整串更有節奏感，也能保護珠子之間不互相磨損。',
+    meaning:''},
+};
+const FAMILY = id => id.startsWith('rut')?'rut':id.startsWith('peri')?'peri':id.startsWith('clr')?'clr':id.startsWith('gmoon')?'gmoon':id.startsWith('moon')?'moon':
+  id.startsWith('rose')?'rose':id.startsWith('straw')?'straw':id.startsWith('ame')?'ame':id.startsWith('aqua')?'aqua':id.startsWith('cit')?'cit':id.startsWith('obs')?'obs':id.startsWith('pearl')?'pearl':'metal';
+const CAT = {}; ITEMS.forEach(it => { it.w = it.w || it.d; it.images = it.images || []; it.info = it.info || INFO[FAMILY(it.id)]; CAT[it.id] = it; });
+// a bead entry in a design: {uid, id, v}; v picks which of the item's photos this bead shows
+let uidN = 1;
+const mk = id => ({ uid: uidN++, id, v: Math.floor(Math.random()*CONFIG.variants) });
+const sizeLabel = it => it.kind === 'spacer' ? `佔${it.w}mm` : `${it.d}mm`;
+
+/* ---------- bead drawing ---------- */
+const rgba = (c,a) => `rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+const mix = (c,t,k) => c.map((v,i) => v + (t[i]-v)*k);
+function rng(seed){ let s=0; for(const ch of seed) s=(s*31+ch.charCodeAt(0))|0; return () => { s|=0; s=s+0x6D2B79F5|0; let t=Math.imul(s^s>>>15,1|s); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+function drawGem(c, r, p, rand){
+  const base=p.base, dark=mix(base,[0,0,0],.55), light=mix(base,[255,255,255],.4);
+  const a = 1 - p.clear*.42;
+  c.save(); c.beginPath(); c.arc(0,0,r,0,TAU); c.clip();
+  let g = c.createRadialGradient(r*.22,r*.3,0,0,0,r);
+  g.addColorStop(0,rgba(light,a)); g.addColorStop(.55,rgba(base,a)); g.addColorStop(1,rgba(dark,Math.min(1,a+.25)));
+  c.fillStyle=g; c.fillRect(-r,-r,2*r,2*r);
+  if(p.clear>.4){
+    g=c.createRadialGradient(0,0,r*.45,0,0,r);
+    g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(.78,rgba(dark,.32*p.clear)); g.addColorStop(.94,'rgba(255,255,255,.22)'); g.addColorStop(1,rgba(dark,.4));
+    c.fillStyle=g; c.fillRect(-r,-r,2*r,2*r);
+  }
+  if(p.incl==='rutile'){
+    const n=12+(rand()*6|0), ang0=rand()*Math.PI;
+    for(let i=0;i<n;i++){
+      const x=(rand()*2-1)*r*.8, y=(rand()*2-1)*r*.8, ang=ang0+(rand()-.5)*1.3, L=r*(.5+rand()*1.1);
+      c.strokeStyle=rgba(p.ic,.45+rand()*.4); c.lineWidth=Math.max(.5,r*(.02+rand()*.03)); c.lineCap='round';
+      c.beginPath(); c.moveTo(x-Math.cos(ang)*L/2,y-Math.sin(ang)*L/2); c.lineTo(x+Math.cos(ang)*L/2,y+Math.sin(ang)*L/2); c.stroke();
+    }
+  } else if(p.incl==='dots'){
+    for(let i=0;i<26;i++){ const t=rand()*TAU, d=Math.sqrt(rand())*r*.9; c.fillStyle=rgba(p.ic,.5+rand()*.4);
+      c.beginPath(); c.arc(Math.cos(t)*d,Math.sin(t)*d,r*(.025+rand()*.04),0,TAU); c.fill(); }
+  } else if(p.incl==='cloud'){
+    for(let i=0;i<4;i++){ const x=(rand()*2-1)*r*.5, y=(rand()*2-1)*r*.5, R=r*(.3+rand()*.35);
+      g=c.createRadialGradient(x,y,0,x,y,R); g.addColorStop(0,'rgba(255,255,255,.28)'); g.addColorStop(1,'rgba(255,255,255,0)');
+      c.fillStyle=g; c.fillRect(-r,-r,2*r,2*r); }
+  } else if(p.incl==='band'){
+    c.save(); c.rotate(rand()*Math.PI);
+    for(let i=-2;i<=2;i++){ c.fillStyle=rgba(p.ic,.18+rand()*.15); c.fillRect(-r,i*r*.38-r*.08,2*r,r*(.08+rand()*.12)); }
+    c.restore();
+  }
+  if(p.adu){ g=c.createRadialGradient(-r*.1,-r*.12,0,-r*.1,-r*.12,r*.75); g.addColorStop(0,'rgba(140,185,255,.55)'); g.addColorStop(1,'rgba(140,185,255,0)'); c.fillStyle=g; c.fillRect(-r,-r,2*r,2*r); }
+  g=c.createRadialGradient(r*.38,r*.42,0,r*.38,r*.42,r*.62);
+  g.addColorStop(0,rgba(p.glow,.25+.5*p.clear)); g.addColorStop(1,rgba(p.glow,0));
+  c.fillStyle=g; c.fillRect(-r,-r,2*r,2*r);
+  c.restore();
+  specular(c,r,p.clear<.1?.75:.9);
+  c.beginPath(); c.arc(0,0,r-.4,0,TAU); c.strokeStyle=rgba(dark,.35); c.lineWidth=Math.max(.5,r*.035); c.stroke();
+}
+function specular(c,r,a){
+  c.save(); c.translate(-r*.36,-r*.4); c.rotate(-.7); c.scale(1,.55);
+  const g=c.createRadialGradient(0,0,0,0,0,r*.36); g.addColorStop(0,`rgba(255,255,255,${a})`); g.addColorStop(1,'rgba(255,255,255,0)');
+  c.fillStyle=g; c.beginPath(); c.arc(0,0,r*.36,0,TAU); c.fill(); c.restore();
+  c.fillStyle=`rgba(255,255,255,${Math.min(1,a+.1)})`; c.beginPath(); c.arc(-r*.42,-r*.46,r*.07,0,TAU); c.fill();
+}
+function drawMetal(c,r,t){
+  const g=c.createRadialGradient(-r*.35,-r*.38,0,0,0,r);
+  g.addColorStop(0,t[2]); g.addColorStop(.35,t[3]); g.addColorStop(.75,t[1]); g.addColorStop(1,t[0]);
+  c.fillStyle=g; c.beginPath(); c.arc(0,0,r,0,TAU); c.fill(); specular(c,r,.85);
+}
+function drawPearl(c,r){
+  let g=c.createRadialGradient(-r*.3,-r*.35,0,0,0,r);
+  g.addColorStop(0,'#ffffff'); g.addColorStop(.42,'#f4eee7'); g.addColorStop(.85,'#d9ccbf'); g.addColorStop(1,'#b9a798');
+  c.fillStyle=g; c.beginPath(); c.arc(0,0,r,0,TAU); c.fill();
+  g=c.createRadialGradient(r*.32,r*.36,0,r*.32,r*.36,r*.6); g.addColorStop(0,'rgba(242,190,205,.38)'); g.addColorStop(1,'rgba(242,190,205,0)');
+  c.fillStyle=g; c.beginPath(); c.arc(0,0,r,0,TAU); c.fill(); specular(c,r,.7);
+}
+function rrect(c,x,y,w,h,r){ c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
+function drawSpacer(c,w,h,t,variant){
+  const rad=Math.min(w*.48,h*.2);
+  rrect(c,-w/2,-h/2,w,h,rad);
+  let g=c.createLinearGradient(-w/2,0,w/2,0);
+  g.addColorStop(0,t[0]); g.addColorStop(.3,t[2]); g.addColorStop(.55,t[3]); g.addColorStop(1,t[4]);
+  c.fillStyle=g; c.fill();
+  c.save(); c.clip();
+  g=c.createLinearGradient(0,-h/2,0,h/2); g.addColorStop(0,'rgba(0,0,0,.3)'); g.addColorStop(.18,'rgba(0,0,0,0)'); g.addColorStop(.82,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(0,0,0,.35)');
+  c.fillStyle=g; c.fillRect(-w/2,-h/2,w,h);
+  if(variant==='wave'){
+    c.strokeStyle='rgba(70,45,8,.55)'; c.lineWidth=Math.max(.6,w*.12);
+    for(let y=-h;y<h;y+=w*.55){ c.beginPath(); c.moveTo(-w/2,y); c.lineTo(w/2,y+w*.7); c.stroke(); }
+  }
+  if(variant==='gem'){
+    const n=Math.max(3,Math.floor(h/(w*.95))), step=h/n, sr=w*.3;
+    for(let i=0;i<n;i++){ const y=-h/2+step*(i+.5);
+      const gg=c.createRadialGradient(-sr*.3,y-sr*.3,0,0,y,sr); gg.addColorStop(0,'#ffffff'); gg.addColorStop(.6,'#dfe6f0'); gg.addColorStop(1,'#8d96a3');
+      c.fillStyle=gg; c.beginPath(); c.arc(0,y,sr,0,TAU); c.fill(); }
+  }
+  c.restore();
+}
+function drawItem(c,it,S){
+  if(it.kind==='spacer') drawSpacer(c,it.w*S,it.d*S,it.tone,it.variant);
+  else if(it.kind==='metal') drawMetal(c,it.d/2*S,it.tone);
+  else if(it.kind==='pearl') drawPearl(c,it.d/2*S);
+  else drawGem(c,it.d/2*S,it.p,rng(it.id));
+}
+/* Real photos: item.images = [url, url, url]. Each bead shows images[v % n]; until a photo loads
+   (or if there are none) the drawn bead is used. Photos are square PNGs, bead filling CONFIG.photoFill of the width. */
+const imgCache=new Map();
+let onPhotosChanged=()=>{};
+function photoFor(it,v){
+  if(!it.images.length) return null;
+  const url=it.images[v%it.images.length]; let im=imgCache.get(url);
+  if(!im){ im=new Image(); im.crossOrigin='anonymous'; im.onload=()=>{ spriteCache.clear(); onPhotosChanged(); }; im.src=url; imgCache.set(url,im); }
+  return im.complete&&im.naturalWidth?im:null;
+}
+const spriteCache=new Map();
+function sprite(it,S,v=0){
+  const img=photoFor(it,v);
+  const key=it.id+'@'+S.toFixed(3)+'#'+(img?v%it.images.length:'d'); let sp=spriteCache.get(key); if(sp) return sp;
+  if(spriteCache.size>400) spriteCache.clear();
+  const box=img?Math.max(it.d,it.w)*S/CONFIG.photoFill:0;
+  const half=Math.ceil(Math.max(Math.max(it.d,it.w)*S/2+2,box/2)), cv=document.createElement('canvas');
+  cv.width=cv.height=half*2*dpr; const c=cv.getContext('2d'); c.scale(dpr,dpr); c.translate(half,half);
+  if(img) c.drawImage(img,-box/2,-box/2,box,box); else drawItem(c,it,S);
+  sp={cv,half}; spriteCache.set(key,sp); return sp;
+}
+function blit(ctx,it,S,x,y,angle,sc,v=0){
+  const sp=sprite(it,S,v); ctx.save(); ctx.translate(x,y); if(angle) ctx.rotate(angle); if(sc&&sc!==1) ctx.scale(sc,sc);
+  ctx.drawImage(sp.cv,-sp.half,-sp.half,sp.half*2,sp.half*2); ctx.restore();
+}
+function shadow(ctx,it,S,x,y,angle,off,alpha){
+  const hw=it.w*S/2, hh=it.d*S/2;
+  ctx.save(); ctx.translate(x+hh*.14*off,y+hh*.2*off); if(angle) ctx.rotate(angle); ctx.scale(hw*1.15,hh*1.15);
+  const g=ctx.createRadialGradient(0,0,0,0,0,1); g.addColorStop(0,`rgba(30,36,30,${alpha})`); g.addColorStop(1,'rgba(30,36,30,0)');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(0,0,1,0,TAU); ctx.fill(); ctx.restore();
+}
+
+/* ---------- state ---------- */
+const stage=document.getElementById('stage'), cv=document.getElementById('cv'); let ctx=cv.getContext('2d'); let SNAP=false;
+const engine=Engine.create({gravity:{x:0,y:0,scale:0}}); engine.positionIterations=8;
+let side=0, S=1, cx=0, cy=0, Rin=0, walls=[], plate=null;
+let seq=[], mode='dish', selected=null, history=[];
+const bodies=new Map();      // uid -> physics body (散盤)
+const boardPos=new Map();    // uid -> current mm along the ruler (串珠盤, animated)
+
+const wristMM=()=>+document.getElementById('wrist').value*10;
+// 鬆份 (ease) grows with bead size: a bracelet's centre line sits half a bead out from the skin.
+// Common guide: 6mm +10, 8mm +15, 10mm +20, 12mm +25 mm  →  2.5 × d − 5
+const fitAdj=()=>+document.getElementById('fit').value;
+function mainBeadD(list){ const r=(list||seq.map(s=>CAT[s.id])).filter(i=>i.kind==='gem'||i.kind==='pearl'); return r.length?r.reduce((a,i)=>a+i.d,0)/r.length:8; }
+const easeFor=d=>Math.max(5,Math.round((2.5*d-5+fitAdj())*2)/2);
+const targetLen=()=>wristMM()+easeFor(mainBeadD());
+const totalW=()=>seq.reduce((a,s)=>a+CAT[s.id].w,0);
+
+/* ---------- 散盤: physics dish ---------- */
+function buildWalls(){
+  if(walls.length) Composite.remove(engine.world,walls);
+  const N=60, th=side*.1, R=Rin+th/2, len=TAU*R/N*1.2; walls=[];
+  for(let i=0;i<N;i++){ const a=i/N*TAU; walls.push(Bodies.rectangle(cx+Math.cos(a)*R,cy+Math.sin(a)*R,th,len,{isStatic:true,angle:a})); }
+  Composite.add(engine.world,walls);
+}
+function buildPlate(){
+  plate=document.createElement('canvas'); plate.width=plate.height=side*dpr;
+  const c=plate.getContext('2d'); c.scale(dpr,dpr);
+  const Ro=side/2*.97;
+  let g=c.createRadialGradient(cx+side*.02,cy+side*.04,Ro*.8,cx+side*.02,cy+side*.04,Ro*1.06);
+  g.addColorStop(0,'rgba(0,0,0,.55)'); g.addColorStop(1,'rgba(0,0,0,0)'); c.fillStyle=g; c.fillRect(0,0,side,side);
+  g=c.createRadialGradient(cx-Ro*.3,cy-Ro*.35,0,cx,cy,Ro);
+  g.addColorStop(0,'#f6f7f3'); g.addColorStop(.8,'#e3e6df'); g.addColorStop(1,'#c9cec5');
+  c.fillStyle=g; c.beginPath(); c.arc(cx,cy,Ro,0,TAU); c.fill();
+  const Rw=Rin+side*.012;
+  g=c.createRadialGradient(cx,cy,Rw*.2,cx,cy,Rw);
+  g.addColorStop(0,'#f1f3ee'); g.addColorStop(.88,'#e7eae3'); g.addColorStop(.97,'#d0d5cc'); g.addColorStop(1,'#bfc5bb');
+  c.fillStyle=g; c.beginPath(); c.arc(cx,cy,Rw,0,TAU); c.fill();
+  c.strokeStyle='rgba(160,128,62,.75)'; c.lineWidth=1; c.beginPath(); c.arc(cx,cy,Rw+side*.012,0,TAU); c.stroke();
+  const Rt=Rw+side*.024, step=5/(TAU*Rt/S)*TAU;
+  c.strokeStyle='rgba(140,120,80,.45)';
+  for(let a=0,i=0;a<TAU-1e-6;a+=step,i++){ const L=i%4===0?side*.016:side*.008;
+    c.lineWidth=i%4===0?1:.7; c.beginPath(); c.moveTo(cx+Math.cos(a)*Rt,cy+Math.sin(a)*Rt); c.lineTo(cx+Math.cos(a)*(Rt+L),cy+Math.sin(a)*(Rt+L)); c.stroke(); }
+}
+function layoutStage(){
+  const box=stage.getBoundingClientRect(); const ns=Math.floor(Math.min(box.width,box.height));
+  if(ns<40||ns===side) return;
+  const oS=S, ocx=cx, ocy=cy;
+  side=ns; S=side/DISH_MM; cx=cy=side/2; Rin=side/2*.82;
+  cv.width=cv.height=side*dpr; cv.style.width=cv.style.height=side+'px';
+  const f=S/oS; bodies.forEach(b=>{ Body.scale(b,f,f); Body.setPosition(b,{x:cx+(b.position.x-ocx)*f,y:cy+(b.position.y-ocy)*f}); });
+  buildWalls(); buildPlate(); boardCache=null;
+}
+function makeBody(it,x,y){
+  const opt={frictionAir:.085,friction:.04,restitution:.25,density:.002};
+  return it.kind==='spacer'
+    ? Bodies.rectangle(x,y,it.w*S,it.d*S,Object.assign({chamfer:{radius:it.w*S*.45}},opt))
+    : Bodies.circle(x,y,it.d/2*S,opt);
+}
+function spawn(uid,id,v=0){
+  const it=CAT[id], a=Math.random()*TAU, d=Rin*(.35+Math.random()*.3);
+  const b=makeBody(it,cx+Math.cos(a)*d,cy+Math.sin(a)*d);
+  Body.setAngle(b,Math.random()*TAU);
+  b.plugin={uid,id,v,born:performance.now()};
+  Body.setVelocity(b,{x:-Math.cos(a)*1.2,y:-Math.sin(a)*1.2});
+  Composite.add(engine.world,b); bodies.set(uid,b);
+}
+Events.on(engine,'beforeUpdate',()=>{
+  bodies.forEach(b=>{ const dx=cx-b.position.x, dy=cy-b.position.y, k=2.2e-6*b.mass/(S/3);
+    Body.applyForce(b,b.position,{x:dx*k,y:dy*k}); });
+});
+const runner=Runner.create(); Runner.run(runner,engine);
+function shake(){ bodies.forEach(b=>Body.setVelocity(b,{x:(Math.random()-.5)*14,y:(Math.random()-.5)*14})); }
+
+/* ---------- sequence edits ---------- */
+function pushHistory(){ history.push(seq.map(s=>({...s}))); if(history.length>80) history.shift(); }
+function restore(snap){
+  const keep=new Set(snap.map(s=>s.uid));
+  bodies.forEach((b,uid)=>{ if(!keep.has(uid)){ Composite.remove(engine.world,b); bodies.delete(uid); boardPos.delete(uid);} });
+  snap.forEach(s=>{ if(!bodies.has(s.uid)) spawn(s.uid,s.id,s.v); });
+  seq=snap; select(null); refresh();
+}
+function addItem(id){ pushHistory(); const e=mk(id); seq.push(e); spawn(e.uid,e.id,e.v); refresh(); }
+function removeUid(uid){ pushHistory(); restore(seq.filter(s=>s.uid!==uid).map(s=>({...s}))); }
+
+/* ---------- 串珠盤: round board with a measured groove ---------- */
+let boardCache=null, bDrag=null;
+function boardGeom(){
+  const T=targetLen(), W=totalW(), L=Math.max(T,W), R=side*.28, Sb=R*TAU/L;
+  return {T,W,L,R,Sb,ch:11*Sb};
+}
+const mmToAng=(g,mm)=>-Math.PI/2+mm/g.L*TAU;
+function buildBoard(g){
+  const key=[side,g.L.toFixed(2),g.T].join('|'); if(boardCache&&boardCache.key===key) return boardCache.cv;
+  const c2=document.createElement('canvas'); c2.width=c2.height=side*dpr; const c=c2.getContext('2d'); c.scale(dpr,dpr);
+  const Ro=side*.445;
+  let gr=c.createRadialGradient(cx+side*.02,cy+side*.04,Ro*.8,cx+side*.02,cy+side*.04,Ro*1.06);
+  gr.addColorStop(0,'rgba(0,0,0,.55)'); gr.addColorStop(1,'rgba(0,0,0,0)'); c.fillStyle=gr; c.fillRect(0,0,side,side);
+  gr=c.createRadialGradient(cx-Ro*.3,cy-Ro*.35,0,cx,cy,Ro);
+  gr.addColorStop(0,'#f4f5f1'); gr.addColorStop(.8,'#e2e5de'); gr.addColorStop(1,'#c9cec5');
+  c.fillStyle=gr; c.beginPath(); c.arc(cx,cy,Ro,0,TAU); c.fill();
+  c.strokeStyle='rgba(160,128,62,.75)'; c.lineWidth=1; c.beginPath(); c.arc(cx,cy,Ro*.95,0,TAU); c.stroke();
+  // the groove the beads sit in
+  const r1=g.R-g.ch/2, r2=g.R+g.ch/2;
+  c.beginPath(); c.arc(cx,cy,r2,0,TAU); c.arc(cx,cy,r1,0,TAU,true);
+  gr=c.createRadialGradient(cx,cy,r1,cx,cy,r2);
+  gr.addColorStop(0,'#b6bcb1'); gr.addColorStop(.3,'#d0d5cb'); gr.addColorStop(.85,'#e3e6df'); gr.addColorStop(1,'#c6cbc1');
+  c.fillStyle=gr; c.fill();
+  // ruler around the groove: 1/5/10 mm ticks, numbers in cm
+  const t0=r2+3, u=side/380;
+  c.textAlign='center'; c.textBaseline='middle'; c.font=`500 ${Math.max(9,10*u)}px "IBM Plex Mono",monospace`;
+  for(let m=0;m<=Math.floor(g.L);m++){
+    const big=m%10===0, mid=m%5===0; if(!big&&!mid&&g.Sb<2.4) continue;
+    const a=mmToAng(g,m), h=(big?8:mid?5:2.6)*u;
+    c.strokeStyle=big?'rgba(70,60,40,.75)':'rgba(90,80,60,.4)'; c.lineWidth=big?1.1:.7;
+    c.beginPath(); c.moveTo(cx+Math.cos(a)*t0,cy+Math.sin(a)*t0); c.lineTo(cx+Math.cos(a)*(t0+h),cy+Math.sin(a)*(t0+h)); c.stroke();
+    if(big&&(g.L-m)>4){ const tr=t0+h+8*u; c.fillStyle='rgba(70,60,40,.85)'; c.fillText(m/10,cx+Math.cos(a)*tr,cy+Math.sin(a)*tr); }
+  }
+  // target length
+  const a=mmToAng(g,g.T);
+  c.strokeStyle='#b0452f'; c.lineWidth=1.6; c.beginPath(); c.moveTo(cx+Math.cos(a)*(r1-3),cy+Math.sin(a)*(r1-3)); c.lineTo(cx+Math.cos(a)*(r2+12*u),cy+Math.sin(a)*(r2+12*u)); c.stroke();
+  c.fillStyle='#b0452f'; c.font=`600 ${Math.max(10,11*u)}px "Noto Sans TC",sans-serif`;
+  const lr=r1-13*u; c.fillText('目標',cx+Math.cos(a)*lr,cy+Math.sin(a)*lr);
+  boardCache={key,cv:c2}; return c2;
+}
+/* Bare cord is spread over the gaps between beads. Each bead keeps a random weight for the gap after it
+   (about a third get none), so the cord shows in a few uneven places rather than one block. */
+const gapW=new Map();
+function gw(uid){ if(!gapW.has(uid)) gapW.set(uid,Math.random()<.35?0:.15+Math.random()); return gapW.get(uid); }
+function gapFn(list,exposed){ const sum=list.reduce((a,s)=>a+gw(s.uid),0);
+  return uid=>exposed<=0?0:sum>0?exposed*gw(uid)/sum:exposed/list.length; }
+function boardLayout(g){
+  const gap=gapFn(seq,Math.max(0,g.L-g.W));
+  const out=new Map(); let cum=0, idx=0, gapDone=!bDrag||!bDrag.moved;
+  seq.forEach(s=>{ if(bDrag&&bDrag.moved&&s.uid===bDrag.uid) return; const w=CAT[s.id].w;
+    if(!gapDone&&bDrag.insert===idx){ cum+=bDrag.w+gap(bDrag.uid); gapDone=true; }
+    out.set(s.uid,cum+w/2); cum+=w+gap(s.uid); idx++; });
+  return out;
+}
+const ptToMM=(g,p)=>((Math.atan2(p.y-cy,p.x-cx)+Math.PI/2)%TAU+TAU)%TAU/TAU*g.L;
+function insertIndex(g,p){
+  const mm=ptToMM(g,p), gap=gapFn(seq,Math.max(0,g.L-g.W)); let cum=0, i=0;
+  for(const s of seq){ if(s.uid===bDrag.uid) continue; const w=CAT[s.id].w; if(cum+w/2>mm) return i; cum+=w+gap(s.uid); i++; }
+  return i;
+}
+function drawBoard(now){
+  const g=boardGeom(); ctx.drawImage(buildBoard(g),0,0,side,side);
+  const tgt=boardLayout(g), k=(reduceMotion||SNAP)?1:.2;
+  if(g.W>0){ ctx.strokeStyle='rgba(150,120,70,.8)'; ctx.lineWidth=1.4; ctx.beginPath(); ctx.arc(cx,cy,g.R,0,TAU); ctx.stroke(); }
+  const pts=[];
+  for(const s of seq){
+    if(bDrag&&bDrag.moved&&s.uid===bDrag.uid) continue;
+    const t=tgt.get(s.uid); let cur=boardPos.get(s.uid); if(cur==null) cur=t;
+    cur+=(t-cur)*k; boardPos.set(s.uid,cur);
+    const th=mmToAng(g,cur); pts.push({s,it:CAT[s.id],x:cx+Math.cos(th)*g.R,y:cy+Math.sin(th)*g.R,a:th+Math.PI/2});
+  }
+  for(const q of pts) shadow(ctx,q.it,g.Sb,q.x,q.y,q.a,1,.3);
+  for(const q of pts){ blit(ctx,q.it,g.Sb,q.x,q.y,q.a,1,q.s.v); if(q.s.uid===selected&&!SNAP) ring(q.x,q.y,Math.max(q.it.d,q.it.w)/2*g.Sb+4); }
+  if(bDrag&&bDrag.moved){ const it=CAT[bDrag.id], a=Math.atan2(bDrag.p.y-cy,bDrag.p.x-cx)+Math.PI/2;
+    shadow(ctx,it,g.Sb,bDrag.p.x,bDrag.p.y,a,4,.35); blit(ctx,it,g.Sb,bDrag.p.x,bDrag.p.y-6,a,1.25,bDrag.v); }
+  if(!seq.length){ emptyText('點下方素材，排進串珠盤',cy); return; }
+  // inner diameter of the finished bracelet: centre-line circumference / π minus the main bead size
+  const rounds=seq.map(s=>CAT[s.id]).filter(i=>i.kind!=='spacer');
+  const d=rounds.length?rounds.reduce((a,i)=>a+i.d,0)/rounds.length:0, inner=g.L/Math.PI-d, u=side/380;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillStyle='rgba(90,96,88,.85)'; ctx.font=`500 ${Math.max(11,11*u)}px "Noto Sans TC",sans-serif`; ctx.fillText('內圈直徑約',cx,cy-12*u);
+  ctx.fillStyle='rgba(40,46,42,.9)'; ctx.font=`500 ${Math.max(16,20*u)}px "IBM Plex Mono",monospace`; ctx.fillText(`${Math.max(0,inner).toFixed(0)} mm`,cx,cy+10*u);
+  ctx.textBaseline='alphabetic';
+}
+function hitBoard(p){
+  const g=boardGeom(); let best=null, bd=Infinity;
+  for(const s of seq){ const it=CAT[s.id], mm=boardPos.get(s.uid); if(mm==null) continue;
+    const th=mmToAng(g,mm), x=cx+Math.cos(th)*g.R, y=cy+Math.sin(th)*g.R, d=Math.hypot(p.x-x,p.y-y);
+    if(d<Math.max(Math.max(it.d,it.w)/2*g.Sb,14)&&d<bd){ bd=d; best=s; } }
+  return best;
+}
+
+/* ---------- 戴上看: 3D hand you can turn over ---------- */
+const gl=document.getElementById('gl'), w3msg=document.getElementById('w3msg');
+const SKINS=[['#e7b796','淺膚色'],['#c98d66','小麥色'],['#86553a','深膚色'],['#e6dfd3','展示手模']];
+let skin=0;
+const W3={ready:false};
+const view={yaw:0,yawT:0,pitch:.12,dist:500,tx:0,ty:55};
+function viewReset(){ view.yawT=Math.round(view.yaw/TAU)*TAU; view.pitch=.12; view.dist=500; view.tx=0; view.ty=55; }
+function viewClamp(){ const k=wristMM()/160;
+  view.pitch=Math.max(-1.1,Math.min(1.1,view.pitch)); view.dist=Math.max(170,Math.min(900,view.dist));
+  view.ty=Math.max(-170*k,Math.min(200*k,view.ty)); view.tx=Math.max(-110,Math.min(110,view.tx)); }
+function init3D(){
+  if(W3.ready) return true; if(!window.THREE) return false;
+  const T3=THREE, r=new T3.WebGLRenderer({canvas:gl,antialias:true,alpha:true});
+  r.setPixelRatio(dpr); r.outputEncoding=T3.sRGBEncoding; r.setClearColor(0x000000,0);
+  const scene=new T3.Scene(), camera=new T3.PerspectiveCamera(30,1,10,6000);
+  scene.add(new T3.HemisphereLight(0xfff4e8,0x22332f,.5));
+  const key=new T3.DirectionalLight(0xffffff,.75); key.position.set(-120,170,230); scene.add(key);
+  const rim=new T3.DirectionalLight(0xcfe3ff,.45); rim.position.set(170,60,-210); scene.add(rim);
+  const fill=new T3.DirectionalLight(0xffe2cc,.18); fill.position.set(160,-90,120); scene.add(fill);
+  const root=new T3.Group(); scene.add(root);
+  const beads=new T3.Group(); root.add(beads);
+  Object.assign(W3,{T3,r,scene,camera,root,beads,ready:true,photoGen:0,handKey:'',beadKey:'',tex:new Map(),sprites:[],size:0});
+  return true;
+}
+/* One smooth hand: a signed-distance field (palm, wrist, fingers blended with smooth-min)
+   meshed with surface nets, so joints flow into each other instead of looking assembled.
+   Built once at a 16 cm wrist, then scaled to the chosen 手圍. Left hand, back facing +z. */
+const HAND_A=30.5, HAND_B=19.8;   // wrist half-width / half-depth (oval perimeter ≈ 160 mm)
+const v3=(x,y,z)=>[x,y,z], vadd=(a,b,t=1)=>[a[0]+b[0]*t,a[1]+b[1]*t,a[2]+b[2]*t];
+const vnorm=a=>{ const l=Math.hypot(...a)||1; return [a[0]/l,a[1]/l,a[2]/l]; };
+const vcross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+function vrot(v,ax,an){ const c=Math.cos(an), s_=Math.sin(an), d=v[0]*ax[0]+v[1]*ax[1]+v[2]*ax[2], cr=vcross(ax,v);
+  return [v[0]*c+cr[0]*s_+ax[0]*d*(1-c),v[1]*c+cr[1]*s_+ax[1]*d*(1-c),v[2]*c+cr[2]*s_+ax[2]*d*(1-c)]; }
+function handSkeleton(){
+  const segs=[], nails=[], knuckles=[];
+  const fx=[-26,-8.5,9,26.5], fr=[7.2,8,8.3,7.9], fl=[60,76,82,74], sp=[.12,.04,-.01,-.08], props=[.43,.3,.24], curls=[.08,.16,.12];
+  for(let i=0;i<4;i++){
+    let P=v3(fx[i],94,-1.5); const ax=[Math.cos(sp[i]),Math.sin(sp[i]),0], d0=[-Math.sin(sp[i]),Math.cos(sp[i]),0];
+    knuckles.push({p:vadd(P,[0,0,1],7.5),r:fr[i]*.95});
+    let cur=0, r=fr[i];
+    for(let j=0;j<3;j++){ cur+=curls[j]; const d=vrot(d0,ax,-cur), L=fl[i]*props[j], Q=vadd(P,d,L), r2=r*(j===2?.86:.94);
+      segs.push({a:P,b:Q,r1:r,r2,k:1.6});
+      if(j===2) nails.push({tip:Q,d,n:vrot([0,0,1],ax,-cur),r:r2,L});
+      P=Q; r=r2; }
+  }
+  // thumb: from the side of the palm, up and slightly across the palm
+  let P=v3(30,30,-8); const tdirs=[vnorm([.62,.72,-.32]),vnorm([.45,.85,-.28]),vnorm([.3,.93,-.2])], tl=[40,30,24], tr=[12,10.2,9.2,8.2];
+  segs.push({a:v3(22,18,-6),b:P,r1:14,r2:12,k:6});
+  for(let j=0;j<3;j++){ const Q=vadd(P,tdirs[j],tl[j]); segs.push({a:P,b:Q,r1:tr[j],r2:tr[j+1],k:2});
+    if(j===2){ const d=tdirs[j]; let n=vnorm([.75,-.25,.6]); const dd=n[0]*d[0]+n[1]*d[1]+n[2]*d[2]; n=vnorm(vadd(n,d,-dd)); nails.push({tip:Q,d,n,r:tr[3],L:tl[j]}); }
+    P=Q; }
+  return {segs,nails,knuckles};
+}
+function sdRoundCone(px,py,pz,a,b,r1,r2){
+  const bax=b[0]-a[0], bay=b[1]-a[1], baz=b[2]-a[2], l2=bax*bax+bay*bay+baz*baz, rr=r1-r2, a2=l2-rr*rr, il2=1/l2;
+  const pax=px-a[0], pay=py-a[1], paz=pz-a[2], y=pax*bax+pay*bay+paz*baz, z=y-l2;
+  const qx=pax*l2-bax*y, qy=pay*l2-bay*y, qz=paz*l2-baz*y, x2=qx*qx+qy*qy+qz*qz, y2=y*y*l2, z2=z*z*l2, k=Math.sign(rr)*rr*rr*x2;
+  if(Math.sign(z)*a2*z2>k) return Math.sqrt(x2+z2)*il2-r2;
+  if(Math.sign(y)*a2*y2<k) return Math.sqrt(x2+y2)*il2-r1;
+  return (Math.sqrt(x2*a2*il2)+y*rr)*il2-r1;
+}
+const smin=(a,b,k)=>{ const h=Math.max(k-Math.abs(a-b),0)/k; return Math.min(a,b)-h*h*k*.25; };
+function makeHandSDF(){
+  const sk=handSkeleton(), fingers=sk.segs.slice(0,12), thumb=sk.segs.slice(12);
+  return (x,y,z)=>{
+    // forearm: oval cylinder that widens toward the elbow
+    const t=Math.max(0,-y)*.0011, ea=HAND_A*(1+t), eb=HAND_B*(1+t*1.25);
+    const arm=(Math.hypot(x/ea,z/eb)-1)*Math.min(ea,eb), cap=y-34, hc=Math.max(10-Math.abs(arm-cap),0)/10;
+    let d=Math.max(arm,cap)+hc*hc*2.5;   // smooth cap, buried inside the palm
+    // palm: rounded slab, a little thinner toward the knuckles
+    const thick=2.6-Math.max(0,y-60)*.04;
+    const qx=Math.abs(x)-25.5, qy=Math.abs(y-59)-30, qz=Math.abs(z+1)-thick;
+    const palm=Math.hypot(Math.max(qx,0),Math.max(qy,0),Math.max(qz,0))+Math.min(Math.max(qx,qy,qz),0)-11;
+    d=smin(d,palm,18);
+    for(const kn of sk.knuckles){ d=smin(d,Math.hypot(x-kn.p[0],y-kn.p[1],z-kn.p[2])-kn.r,6); }
+    for(let f=0;f<4;f++){ let fd=1e9;
+      for(let j=0;j<3;j++){ const g=fingers[f*3+j]; fd=j?smin(fd,sdRoundCone(x,y,z,g.a,g.b,g.r1,g.r2),g.k):sdRoundCone(x,y,z,g.a,g.b,g.r1,g.r2); }
+      d=smin(d,fd,4.5); }
+    let td=1e9; for(const g of thumb) td=td===1e9?sdRoundCone(x,y,z,g.a,g.b,g.r1,g.r2):smin(td,sdRoundCone(x,y,z,g.a,g.b,g.r1,g.r2),g.k);
+    return smin(d,td,9);
+  };
+}
+function surfaceNets(f,min,max,h){
+  const nx=Math.ceil((max[0]-min[0])/h), ny=Math.ceil((max[1]-min[1])/h), nz=Math.ceil((max[2]-min[2])/h);
+  const sx=nx+1, sxy=(nx+1)*(ny+1), val=new Float32Array(sxy*(nz+1));
+  for(let k=0;k<=nz;k++) for(let j=0;j<=ny;j++) for(let i=0;i<=nx;i++) val[i+j*sx+k*sxy]=f(min[0]+i*h,min[1]+j*h,min[2]+k*h);
+  const cell=new Int32Array(nx*ny*nz).fill(-1), pos=[];
+  const E=[[0,1],[2,3],[4,5],[6,7],[0,2],[1,3],[4,6],[5,7],[0,4],[1,5],[2,6],[3,7]];
+  const C=[[0,0,0],[1,0,0],[0,1,0],[1,1,0],[0,0,1],[1,0,1],[0,1,1],[1,1,1]], cv=new Float32Array(8);
+  for(let k=0;k<nz;k++) for(let j=0;j<ny;j++) for(let i=0;i<nx;i++){
+    let neg=0; for(let c=0;c<8;c++){ cv[c]=val[(i+C[c][0])+(j+C[c][1])*sx+(k+C[c][2])*sxy]; if(cv[c]<0) neg++; }
+    if(neg===0||neg===8) continue;
+    let px=0,py=0,pz=0,n=0;
+    for(const [a,b] of E){ const va=cv[a], vb=cv[b]; if((va<0)===(vb<0)) continue; const t=va/(va-vb);
+      px+=C[a][0]+(C[b][0]-C[a][0])*t; py+=C[a][1]+(C[b][1]-C[a][1])*t; pz+=C[a][2]+(C[b][2]-C[a][2])*t; n++; }
+    cell[i+j*nx+k*nx*ny]=pos.length/3;
+    pos.push(min[0]+(i+px/n)*h,min[1]+(j+py/n)*h,min[2]+(k+pz/n)*h);
+  }
+  const idx=[], ci=(i,j,k)=>cell[i+j*nx+k*nx*ny];
+  const quad=(a,b,c,d,flip)=>{ if(a<0||b<0||c<0||d<0) return; if(flip) idx.push(a,b,c,a,c,d); else idx.push(a,c,b,a,d,c); };
+  for(let k=1;k<nz;k++) for(let j=1;j<ny;j++) for(let i=0;i<nx;i++){ const v0=val[i+j*sx+k*sxy], v1=val[i+1+j*sx+k*sxy]; if((v0<0)!==(v1<0)) quad(ci(i,j-1,k-1),ci(i,j,k-1),ci(i,j,k),ci(i,j-1,k),v0<0); }
+  for(let k=1;k<nz;k++) for(let j=0;j<ny;j++) for(let i=1;i<nx;i++){ const v0=val[i+j*sx+k*sxy], v1=val[i+(j+1)*sx+k*sxy]; if((v0<0)!==(v1<0)) quad(ci(i-1,j,k-1),ci(i-1,j,k),ci(i,j,k),ci(i,j,k-1),v0<0); }
+  for(let k=0;k<nz;k++) for(let j=1;j<ny;j++) for(let i=1;i<nx;i++){ const v0=val[i+j*sx+k*sxy], v1=val[i+j*sx+(k+1)*sxy]; if((v0<0)!==(v1<0)) quad(ci(i-1,j-1,k),ci(i,j-1,k),ci(i,j,k),ci(i-1,j,k),v0<0); }
+  // normals from the field gradient; fix any triangle whose winding disagrees with them
+  const nrm=new Float32Array(pos.length), e=.4;
+  for(let v=0;v<pos.length;v+=3){ const x=pos[v],y=pos[v+1],z=pos[v+2];
+    const g=vnorm([f(x+e,y,z)-f(x-e,y,z),f(x,y+e,z)-f(x,y-e,z),f(x,y,z+e)-f(x,y,z-e)]); nrm[v]=g[0]; nrm[v+1]=g[1]; nrm[v+2]=g[2]; }
+  for(let t=0;t<idx.length;t+=3){ const a=idx[t]*3,b=idx[t+1]*3,c=idx[t+2]*3;
+    const u=[pos[b]-pos[a],pos[b+1]-pos[a+1],pos[b+2]-pos[a+2]], w=[pos[c]-pos[a],pos[c+1]-pos[a+1],pos[c+2]-pos[a+2]], fn=vcross(u,w);
+    if(fn[0]*(nrm[a]+nrm[b]+nrm[c])+fn[1]*(nrm[a+1]+nrm[b+1]+nrm[c+1])+fn[2]*(nrm[a+2]+nrm[b+2]+nrm[c+2])<0){ const tmp=idx[t+1]; idx[t+1]=idx[t+2]; idx[t+2]=tmp; } }
+  return {pos:new Float32Array(pos),nrm,idx};
+}
+function buildHand(){
+  const T3=W3.T3, k=wristMM()/160;
+  if(!W3.hand){
+    const sdf=makeHandSDF(), m=surfaceNets(sdf,[-62,-262,-52],[98,200,32],2.4);
+    const geo=new T3.BufferGeometry();
+    geo.setAttribute('position',new T3.BufferAttribute(m.pos,3)); geo.setAttribute('normal',new T3.BufferAttribute(m.nrm,3));
+    geo.setIndex(m.idx.length>65535?new T3.Uint32BufferAttribute(m.idx,1):new T3.Uint16BufferAttribute(m.idx,1));
+    W3.skinMat=new T3.MeshStandardMaterial({roughness:.58,metalness:0});
+    W3.nailMat=new T3.MeshStandardMaterial({roughness:.28,metalness:0});
+    const g=new T3.Group(); g.add(new T3.Mesh(geo,W3.skinMat));
+    const sph=new T3.SphereGeometry(1,24,16);
+    for(const n of handSkeleton().nails){ // nail: flattened ellipsoid lying on the back of the last joint
+      const y=vnorm(n.d), z=vnorm(n.n), x=vcross(y,z), c=vadd(vadd(n.tip,n.d,-n.L*.38),n.n,n.r*.72);
+      const ms=new T3.Mesh(sph,W3.nailMat); ms.quaternion.setFromRotationMatrix(new T3.Matrix4().makeBasis(new T3.Vector3(...x),new T3.Vector3(...y),new T3.Vector3(...z)));
+      ms.position.set(...c); ms.scale.set(n.r*.66,n.L*.36,n.r*.22); g.add(ms); }
+    W3.hand=g; W3.root.add(g);
+  }
+  W3.hand.scale.setScalar(k); W3.a=HAND_A*k; W3.b=HAND_B*k;
+  if(W3.skinKey!==skin){ W3.skinKey=skin; W3.skinMat.color.set(SKINS[skin][0]); W3.nailMat.color.set(skin===3?'#f2eee8':'#f1d4cb'); }
+}
+function beadTex(it,v){
+  const key=it.id+'#'+v; let t=W3.tex.get(key); if(t) return t;
+  const sp=sprite(it,12,v); t=new W3.T3.CanvasTexture(sp.cv); t.encoding=W3.T3.sRGBEncoding; t.anisotropy=4;
+  t={tex:t,mm:sp.half*2/12}; W3.tex.set(key,t); return t;
+}
+function buildBeads(){
+  const W=totalW(), key=seq.map(s=>s.id+':'+s.v+':'+gw(s.uid).toFixed(3)).join(',')+'|'+wristMM()+'|'+W3.photoGen;
+  if(W3.beadKey===key) return; W3.beadKey=key;
+  const T3=W3.T3; W3.beads.clear(); W3.sprites=[];
+  W3.exposed=0;
+  if(!seq.length) return;
+  // bracelet = ellipse hugging the oval wrist, scaled so its centre line equals the strung length
+  // bead centres sit ~0.3d off the skin: beads press in a little, the way a real bracelet does
+  const dm=Math.max(...seq.map(s=>CAT[s.id].d)), A0=W3.a+dm*.3, B0=W3.b+dm*.3, q=B0/A0;
+  const per=(A,B)=>Math.PI*(3*(A+B)-Math.sqrt((3*A+B)*(A+3*B)));
+  // the cord, not the beads, closes the loop: a short strand still fits, the leftover cord just shows
+  let A=Math.max(W/per(1,q),A0); const B=A*q, Lc=per(A,B); W3.exposed=Math.max(0,Lc-W);
+  const N=720, cum=[0], P=[];
+  for(let i=0;i<=N;i++){ const u=i/N*TAU; P.push([A*Math.sin(u),B*Math.cos(u)]); if(i) cum.push(cum[i-1]+Math.hypot(P[i][0]-P[i-1][0],P[i][1]-P[i-1][1])); }
+  const at=s=>{ s=((s%Lc)+Lc)%Lc*cum[N]/Lc; let lo=0,hi=N; while(hi-lo>1){ const m=(lo+hi)>>1; if(cum[m]<=s) lo=m; else hi=m; }
+    const f=(s-cum[lo])/((cum[hi]-cum[lo])||1); return [P[lo][0]+(P[hi][0]-P[lo][0])*f,P[lo][1]+(P[hi][1]-P[lo][1])*f]; };
+  const gap=gapFn(seq,W3.exposed); let c=-(CAT[seq[0].id].w/2); const y=-4*wristMM()/160;
+  seq.forEach(s=>{ const it=CAT[s.id], mid=c+it.w/2; c+=it.w+gap(s.uid);
+    const p=at(mid), p2=at(mid+.5), bt=beadTex(it,s.v);
+    const m=new T3.SpriteMaterial({map:bt.tex,transparent:true,depthWrite:false});
+    const spr=new T3.Sprite(m); spr.position.set(p[0],y,p[1]); spr.scale.set(bt.mm,bt.mm,1);
+    spr.userData={spacer:it.kind==='spacer',tan:new T3.Vector3(p2[0]-p[0],0,p2[1]-p[1]).normalize()};
+    W3.beads.add(spr); W3.sprites.push(spr); });
+  const cord=[]; for(let i=0;i<=180;i++){ const p=at(i/180*Lc); cord.push(new T3.Vector3(p[0],y,p[1])); }
+  W3.beads.add(new T3.Line(new T3.BufferGeometry().setFromPoints(cord),new T3.LineBasicMaterial({color:0xd8cfbd})));
+}
+const _v1=window.THREE?new THREE.Vector3():null, _v2=window.THREE?new THREE.Vector3():null;
+function render3D(){
+  if(!init3D()){ w3msg.hidden=false; w3msg.textContent='3D 元件載入失敗，請重新整理'; return; }
+  if(W3.size!==side){ W3.size=side; W3.r.setSize(side,side,false); gl.style.width=gl.style.height=side+'px'; }
+  buildHand(); buildBeads();
+  view.yaw+=(view.yawT-view.yaw)*(reduceMotion?1:.14);
+  W3.root.rotation.y=view.yaw;
+  const cam=W3.camera; cam.position.set(view.tx,view.ty+Math.sin(view.pitch)*view.dist,Math.cos(view.pitch)*view.dist); cam.lookAt(view.tx,view.ty,0);
+  W3.scene.updateMatrixWorld();
+  for(const s of W3.sprites){ if(!s.userData.spacer) continue;   // keep spacers lying along the string
+    s.getWorldPosition(_v1); _v2.copy(s.userData.tan).applyQuaternion(W3.root.quaternion).add(_v1);
+    _v1.project(cam); _v2.project(cam); s.material.rotation=Math.atan2(_v2.y-_v1.y,_v2.x-_v1.x); }
+  W3.r.render(W3.scene,cam);
+  const W=totalW(), wm=wristMM();
+  const msg=!seq.length?'還沒有珠子可以戴':W3.exposed>6?`珠子之間共會露出約 ${W3.exposed.toFixed(0)} mm 的繩子`:'';
+  w3msg.hidden=!msg; w3msg.textContent=msg;
+}
+const tonesEl=document.getElementById('tones');
+SKINS.forEach(([c,l],i)=>{ const b=document.createElement('button'); b.className='tone'; b.style.background=c; b.title=l; b.setAttribute('aria-label',l);
+  b.setAttribute('aria-pressed',i===skin); b.onclick=()=>{ skin=i; tonesEl.querySelectorAll('.tone').forEach((t,j)=>t.setAttribute('aria-pressed',j===i)); }; tonesEl.appendChild(b); });
+
+/* ---------- shared render ---------- */
+function ring(x,y,r){ ctx.strokeStyle='#d8b25e'; ctx.lineWidth=2; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.arc(x,y,r,0,TAU); ctx.stroke(); ctx.setLineDash([]); }
+function emptyText(t,y){ ctx.fillStyle='rgba(90,96,88,.85)'; ctx.font=`500 ${Math.max(13,side*.038)}px "Noto Serif TC",serif`; ctx.textAlign='center'; ctx.fillText(t,cx,y); }
+function drawDish(now){
+  if(plate) ctx.drawImage(plate,0,0,side,side);
+  if(!seq.length) emptyText('點下方素材，放進盤中',cy);
+  const list=[...bodies.values()];
+  for(const b of list){ const it=CAT[b.plugin.id], t=Math.min(1,(now-b.plugin.born)/380), lift=reduceMotion?0:(1-t)*(1-t);
+    shadow(ctx,it,S,b.position.x,b.position.y,b.angle,1+lift*5,.38-lift*.2); }
+  for(const b of list){ const it=CAT[b.plugin.id], t=Math.min(1,(now-b.plugin.born)/380), sc=reduceMotion?1:1+.5*(1-t)*(1-t);
+    blit(ctx,it,S,b.position.x,b.position.y,b.angle,sc,b.plugin.v);
+    if(b.plugin.uid===selected) ring(b.position.x,b.position.y,Math.max(it.d,it.w)/2*S+5); }
+}
+let paused=false;
+function frame(now){
+  if(paused){ requestAnimationFrame(frame); return; }
+  ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,side,side);
+  if(side){ if(mode==='dish') drawDish(now); else if(mode==='board') drawBoard(now); else render3D(); }
+  requestAnimationFrame(frame);
+}
+
+/* ---------- pointer ---------- */
+let down=null, drag=null;
+const touches=new Map(); let pinch=null;
+const ptOf=e=>{ const r=cv.getBoundingClientRect(); return {x:e.clientX-r.left,y:e.clientY-r.top}; };
+function hitDish(p){
+  let best=null, bd=Infinity;
+  bodies.forEach(b=>{ const it=CAT[b.plugin.id], rad=Math.max(Math.max(it.d,it.w)/2*S,14), d=Math.hypot(b.position.x-p.x,b.position.y-p.y);
+    if(d<rad&&d<bd){ bd=d; best=b; } });
+  return best;
+}
+cv.addEventListener('pointerdown',e=>{
+  const p=ptOf(e); cv.setPointerCapture(e.pointerId);
+  if(mode==='wear'){ touches.set(e.pointerId,p);
+    if(touches.size===2){ const [a,b]=[...touches.values()]; pinch={d:Math.hypot(a.x-b.x,a.y-b.y),dist:view.dist,mx:(a.x+b.x)/2,my:(a.y+b.y)/2}; }
+    W3.panBtn=e.button===2||e.shiftKey; return; }
+  if(mode==='dish'){ const b=hitDish(p); down={p,uid:b?b.plugin.uid:null,moved:false};
+    if(b){ drag=Constraint.create({pointA:{...p},bodyB:b,pointB:{x:0,y:0},stiffness:.15,damping:.1,length:0}); Composite.add(engine.world,drag); } }
+  else { const s=hitBoard(p); down={p,uid:s?s.uid:null,moved:false};
+    if(s) bDrag={uid:s.uid,id:s.id,v:s.v,w:CAT[s.id].w,p,moved:false,insert:0}; }
+});
+cv.addEventListener('pointermove',e=>{
+  const p=ptOf(e);
+  if(mode==='wear'){ const prev=touches.get(e.pointerId); if(!prev) return; touches.set(e.pointerId,p);
+    const mmPerPx=2*view.dist*Math.tan(15*Math.PI/180)/side;
+    if(touches.size>=2&&pinch){ const [a,b]=[...touches.values()], mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
+      view.dist=pinch.dist*pinch.d/Math.max(1,Math.hypot(a.x-b.x,a.y-b.y));
+      view.tx-=(mx-pinch.mx)*mmPerPx; view.ty+=(my-pinch.my)*mmPerPx; pinch.mx=mx; pinch.my=my; }
+    else if(touches.size===1){ const dx=p.x-prev.x, dy=p.y-prev.y;
+      if(W3.panBtn){ view.tx-=dx*mmPerPx; view.ty+=dy*mmPerPx; }
+      else { view.yawT+=dx*.012; view.pitch+=dy*.006; } }
+    viewClamp(); return; }
+  if(!down) return;
+  if(Math.hypot(p.x-down.p.x,p.y-down.p.y)>6) down.moved=true;
+  if(drag) drag.pointA=p;
+  if(bDrag&&down.moved){ bDrag.moved=true; bDrag.p=p; bDrag.insert=insertIndex(boardGeom(),p); }
+});
+function endPointer(e){
+  if(touches.has(e.pointerId)){ touches.delete(e.pointerId); if(touches.size<2) pinch=null; return; }
+  if(!down) return;
+  if(drag){ Composite.remove(engine.world,drag); drag=null; }
+  if(bDrag&&bDrag.moved){
+    const me=seq.find(s=>s.uid===bDrag.uid), rest=seq.filter(s=>s.uid!==bDrag.uid);
+    const next=[...rest.slice(0,bDrag.insert),me,...rest.slice(bDrag.insert)];
+    boardPos.set(bDrag.uid,ptToMM(boardGeom(),bDrag.p));
+    if(next.some((s,i)=>s.uid!==seq[i].uid)){ pushHistory(); seq=next; refresh(); }
+  }
+  if(!down.moved) select(down.uid);
+  bDrag=null; down=null;
+}
+cv.addEventListener('pointerup',endPointer); cv.addEventListener('pointercancel',endPointer);
+cv.addEventListener('wheel',e=>{ if(mode!=='wear') return; e.preventDefault(); view.dist*=Math.exp(e.deltaY*.0015); viewClamp(); },{passive:false});
+cv.addEventListener('dblclick',()=>{ if(mode==='wear') viewReset(); });
+cv.addEventListener('contextmenu',e=>{ if(mode==='wear') e.preventDefault(); });
+
+/* ---------- 隨機選珠 / 隨機串珠 ---------- */
+const COMPAT={green:['clear','yellow','green'],clear:['green','pink','purple','blue','yellow','grey','black'],pink:['clear','purple','pink'],purple:['clear','pink','blue'],blue:['clear','grey','blue'],yellow:['clear','green','black'],black:['grey','clear','yellow'],grey:['black','clear','blue']};
+const WARM=new Set(['green','yellow','pink','black']);
+const pick=a=>a[Math.random()*a.length|0];
+function randomDesign(){
+  const beads=ITEMS.filter(i=>i.cat==='bead');
+  let mains=fColor!=='all'?beads.filter(b=>b.color===fColor):beads; if(!mains.length) mains=beads;
+  const M=pick(mains);
+  const accPool=beads.filter(b=>b.id!==M.id&&COMPAT[M.color].includes(b.color)&&b.d<=M.d);
+  const A=accPool.length?pick(accPool):M, warm=WARM.has(M.color);
+  const SP=pick(ITEMS.filter(i=>i.cat==='spacer'&&i.tone===(warm?GOLD:SILV)));
+  const BALL=CAT[warm?'ballG3':'ballS3'];
+  const U=pick([[M,SP,A,SP],[M,M,SP,A,SP],[M,BALL,A,BALL],[M,A,M,SP],[M,SP],[M,M,A]]);
+  const T=wristMM()+easeFor(M.d), uw=U.reduce((a,i)=>a+i.w,0), out=[]; let W=0;
+  while(W+uw<=T+1){ U.forEach(i=>out.push(i)); W+=uw; }
+  for(let k=0;T-W>1.5&&k<40;k++){
+    const r=T-W, nx=U[out.length%U.length];
+    const f=nx.w<=r+2?nx:[M,A,SP,BALL].filter(i=>i.w<=r+2).sort((a,b)=>b.w-a.w)[0];
+    if(!f) break; out.push(f); W+=f.w;
+  }
+  return out.map(i=>i.id);
+}
+function randomPick(){
+  pushHistory();
+  restore(randomDesign().map(mk));
+  if(mode==='dish') setMode('board');
+}
+function shuffleString(){
+  if(seq.length<2) return;
+  pushHistory(); gapW.clear();
+  const a=seq.map(s=>({...s}));
+  for(let tries=0;tries<5;tries++){
+    for(let i=a.length-1;i>0;i--){ const j=Math.random()*(i+1)|0; [a[i],a[j]]=[a[j],a[i]]; }
+    if(a.some((s,i)=>s.id!==seq[i].id)) break;
+  }
+  seq=a; select(null); refresh();
+  if(mode!=='board') setMode('board');
+}
+
+/* ---------- UI ---------- */
+const HINTS={dish:'拖曳移動・點一下選取',board:'拖曳珠子換順序',wear:''};
+const modeListeners=[];
+function setMode(m){
+  mode=m; bDrag=null; down=null; stage.dataset.mode=m;
+  document.querySelectorAll('.view').forEach(v=>v.setAttribute('aria-selected',v.dataset.mode===m));
+  document.getElementById('shakeBtn').hidden=m!=='dish';
+  document.getElementById('centerBtn').hidden=m!=='wear';
+  document.getElementById('flipBtn').hidden=m!=='wear';
+  tonesEl.hidden=m!=='wear'; tonesEl.title='拖曳旋轉・雙指縮放・Shift 拖曳平移'; gl.hidden=m!=='wear'; if(m!=='wear') w3msg.hidden=true;
+  document.getElementById('hint').hidden=m==='wear';
+  touches.clear(); pinch=null;
+  document.getElementById('hint').textContent=HINTS[m];
+  if(m==='dish') bodies.forEach(b=>Body.setVelocity(b,{x:(Math.random()-.5)*3,y:(Math.random()-.5)*3}));
+  modeListeners.forEach(fn=>{ try{ fn(m); }catch(e){ console.warn(e); } });
+}
+const CATS=[['all','全部'],['bead','主珠'],['spacer','隔片'],['ball','隔珠'],['used','使用中']];
+const COLORS=[['all','全部顏色'],['clear','白透','#e9eeec'],['grey','灰','#9aa0a3'],['black','黑','#2b2b2d'],['green','綠','#a9c76a'],['yellow','黃金','#e2c25c'],['pink','粉','#efb3bd'],['purple','紫','#a985c4'],['blue','藍','#9fc7d8']];
+let fCat='all', fColor='all';
+const thumbs={};
+ITEMS.forEach(it=>{ const c=document.createElement('canvas'); c.width=c.height=128; const x=c.getContext('2d'); x.scale(2,2); x.translate(32,32); drawItem(x,it,5); thumbs[it.id]=c.toDataURL(); });
+const tabsEl=document.getElementById('tabs'), dotsEl=document.getElementById('dots'), gridEl=document.getElementById('grid');
+CATS.forEach(([k,l])=>{ const b=document.createElement('button'); b.className='tab'; b.setAttribute('role','tab'); b.id='tab-'+k; b.textContent=l;
+  b.setAttribute('aria-selected',k===fCat); b.onclick=()=>{ fCat=k; tabsEl.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected',t===b)); renderGrid(); }; tabsEl.appendChild(b); });
+COLORS.forEach(([k,l,c])=>{ const b=document.createElement('button'); b.className='dot'+(k==='all'?' all':''); b.id='dot-'+k; if(c) b.style.background=c;
+  b.setAttribute('aria-label',l); b.title=l; b.setAttribute('aria-pressed',k===fColor);
+  b.onclick=()=>{ fColor=k; dotsEl.querySelectorAll('.dot').forEach(d=>d.setAttribute('aria-pressed',d===b)); renderGrid(); }; dotsEl.appendChild(b); });
+function counts(){ const m={}; seq.forEach(s=>m[s.id]=(m[s.id]||0)+1); return m; }
+function renderGrid(){
+  const cnt=counts();
+  const list=ITEMS.filter(it=>(fCat==='all'||(fCat==='used'?cnt[it.id]:it.cat===fCat))&&(fColor==='all'||it.color===fColor));
+  gridEl.innerHTML=list.length?'':`<p class="empty">${fCat==='used'?'還沒有用到任何素材':'這個分類沒有這個顏色的素材'}</p>`;
+  list.forEach(it=>{ const c=document.createElement('div'); c.className='card'; c.id='card-'+it.id;
+    c.innerHTML=`<button class="add" aria-label="加入${it.name} ${sizeLabel(it)}，NT$${it.price}"><img alt="" width="64" height="64" src="${it.images[0]||thumbs[it.id]}"><span class="n">${it.name}</span><span class="s">${sizeLabel(it)}</span><span class="p">NT$${it.price}</span></button><button class="info" aria-label="${it.name}介紹">i</button>${cnt[it.id]?`<span class="b">${cnt[it.id]}</span>`:''}`;
+    c.querySelector('.add').onclick=()=>addItem(it.id); c.querySelector('.info').onclick=()=>openInfo(it.id); gridEl.appendChild(c); });
+}
+function select(uid){
+  selected=uid; const el=document.getElementById('sel');
+  const s=uid==null?null:seq.find(x=>x.uid===uid);
+  if(!s){ el.hidden=true; selected=null; return; }
+  const it=CAT[s.id]; el.hidden=false;
+  document.getElementById('selName').innerHTML=`${it.name}<span>${sizeLabel(it)} · NT$${it.price}</span>`;
+}
+function refresh(){
+  const price=seq.reduce((a,s)=>a+CAT[s.id].price,0), W=totalW(), T=targetLen(), diff=T-W;
+  document.getElementById('price').textContent='NT$'+price.toLocaleString('en-US');
+  document.getElementById('count').textContent=seq.length+' 顆';
+  const m=document.getElementById('lenMain');
+  const ok=Math.abs(diff)<=TOL_MM, d1=Math.abs(diff).toFixed(1);
+  m.className=ok?'ok':diff<0?'over':'';
+  m.textContent=diff===0?'長度剛好':ok?`合適・${diff>0?'少':'多'} ${d1} mm`:diff>0?`少 ${d1} mm・會露繩`:`超出 ${d1} mm・偏鬆`;
+  document.getElementById('lenSub').textContent=`已串 ${W.toFixed(1)} / 目標 ${T} mm`;
+  document.getElementById('lenSub').title=`目標 = 手圍 ${wristMM()} + 鬆份 ${(T-wristMM())} mm（依主珠約 ${mainBeadD().toFixed(1)} mm 計算）；目標 ±${TOL_MM} mm 內都算合適`;
+  document.getElementById('undoBtn').disabled=!history.length;
+  document.getElementById('shuffleBtn').disabled=seq.length<2;
+  document.getElementById('doneBtn').disabled=!seq.length;
+  renderGrid();
+}
+
+/* ---------- sheets ---------- */
+let lastFocus=null;
+function openSheet(el){ lastFocus=document.activeElement; el.hidden=false; el.querySelector('.sheet-x').focus(); }
+function closeSheet(el){ el.hidden=true; if(lastFocus&&lastFocus.focus) lastFocus.focus(); }
+document.querySelectorAll('.sheet').forEach(sh=>sh.addEventListener('click',e=>{ if(e.target.closest('[data-close]')) closeSheet(sh); }));
+addEventListener('keydown',e=>{ if(e.key==='Escape') document.querySelectorAll('.sheet:not([hidden])').forEach(closeSheet); });
+const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function md(src){
+  const inline=t=>esc(t).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>'); const out=[]; let list=null;
+  for(const line of (src||'').split('\n')){ const l=line.trim();
+    if(l.startsWith('- ')){ (list=list||[]).push('<li>'+inline(l.slice(2))+'</li>'); continue; }
+    if(list){ out.push('<ul>'+list.join('')+'</ul>'); list=null; }
+    if(!l) continue; out.push(l.startsWith('### ')?'<h4>'+inline(l.slice(4))+'</h4>':'<p>'+inline(l)+'</p>'); }
+  if(list) out.push('<ul>'+list.join('')+'</ul>'); return out.join('');
+}
+const COLOR_NAME=Object.fromEntries(COLORS.map(([k,l])=>[k,l]));
+const CAT_NAME={bead:'主珠',spacer:'隔片',ball:'隔珠'};
+let infoId=null;
+function bigRender(it){ const c=document.createElement('canvas'); c.width=c.height=272; const x=c.getContext('2d'); x.scale(2,2); x.translate(68,68); drawItem(x,it,Math.min(10,100/Math.max(it.d,it.w))); return c.toDataURL(); }
+function openInfo(id){
+  const it=CAT[id], inf=it.info||{}; infoId=id;
+  const pics=it.images.length?it.images:[bigRender(it)];
+  document.getElementById('infoGal').innerHTML=pics.map((u,i)=>`<img alt="${esc(it.name)} 照片 ${i+1}" src="${esc(u)}">`).join('');
+  document.getElementById('infoTitle').textContent=it.name;
+  document.getElementById('infoMeta').textContent=`${sizeLabel(it)} · NT$${it.price} / 顆`;
+  const chips=[CAT_NAME[it.cat],COLOR_NAME[it.color],...(inf.months||[]).map(m=>`${m} 月生日石`),...(inf.tags||[]).filter(t=>!/生日石/.test(t))];
+  document.getElementById('infoChips').innerHTML=chips.filter(Boolean).map(t=>`<span class="chip">${esc(t)}</span>`).join('');
+  const props=[['尺寸',it.kind==='spacer'?`高 ${it.d}mm・串上佔 ${it.w}mm`:`直徑 ${it.d}mm`],['產地',inf.origin],['等級',inf.grade],['單價',`NT$${it.price}`]];
+  document.getElementById('infoProps').innerHTML=props.filter(p=>p[1]).map(([k,v])=>`<dt>${k}</dt><dd>${esc(v)}</dd>`).join('');
+  document.getElementById('infoBlocks').innerHTML=[['價格說明',inf.price],['故事',inf.story],['寓意',inf.meaning]].filter(b=>b[1])
+    .map(([h,t])=>`<section class="blk"><h3>${h}</h3><div class="md">${md(t)}</div></section>`).join('');
+  document.getElementById('photoInput').value='';
+  openSheet(document.getElementById('infoSheet'));
+}
+document.getElementById('infoAdd').onclick=()=>{ if(infoId){ addItem(infoId); closeSheet(document.getElementById('infoSheet')); } };
+document.getElementById('photoInput').onchange=async e=>{
+  const files=[...e.target.files].slice(0,3); if(!files.length||!infoId) return;
+  const it=CAT[infoId];
+  it.images=await Promise.all(files.map(f=>new Promise(res=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.readAsDataURL(f); })));
+  spriteCache.clear(); onPhotosChanged(); openInfo(it.id);
+};
+onPhotosChanged=()=>{ if(W3.ready){ W3.tex.clear(); W3.photoGen++; } renderGrid(); };
+
+/* ---------- 完成: design sheet ---------- */
+function snapshotBoard(px){
+  const save={side,cx,cy,ctx,bc:boardCache,sel:selected};
+  const c=document.createElement('canvas'); c.width=c.height=Math.round(px*dpr);
+  side=px; cx=cy=px/2; ctx=c.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); boardCache=null; SNAP=true; selected=null;
+  try{ drawBoard(0); } finally { SNAP=false; side=save.side; cx=save.cx; cy=save.cy; ctx=save.ctx; boardCache=save.bc; selected=save.sel; }
+  return c;
+}
+function buildOrder(){
+  const groups=new Map();
+  seq.forEach(s=>{ const it=CAT[s.id]; const g=groups.get(s.id)||{id:s.id,name:it.name,size:sizeLabel(it),unit:it.price,qty:0}; g.qty++; groups.set(s.id,g); });
+  const items=[...groups.values()].map(g=>({...g,subtotal:g.unit*g.qty}));
+  const code=Math.random().toString(36).slice(2,8).toUpperCase();
+  return { code, createdAt:new Date().toISOString(), wristMM:wristMM(), fit:document.getElementById('fit').selectedOptions[0].text,
+    lengthMM:+totalW().toFixed(1), targetMM:targetLen(), count:seq.length, total:items.reduce((a,i)=>a+i.subtotal,0),
+    items, sequence:seq.map(s=>({id:s.id,v:s.v})), source:BeadStudio.orderSource };
+}
+function orderText(o){
+  const d=new Date(o.createdAt), ds=`${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+  const lines=[`【手串設計單】#${o.code}　${ds}`,`手圍 ${o.wristMM/10} cm（${o.fit}）｜已串 ${o.lengthMM} mm／目標 ${o.targetMM} mm`,'──────────'];
+  o.items.forEach(i=>lines.push(`${i.name} ${i.size}　× ${i.qty}　NT$${i.subtotal.toLocaleString('en-US')}`));
+  lines.push('──────────',`共 ${o.count} 顆　合計 NT$${o.total.toLocaleString('en-US')}`,'',
+    '串法順序：'+o.sequence.map(s=>{ const it=CAT[s.id]; return it.name+(it.kind==='spacer'?'':it.d); }).join(' → '));
+  return lines.join('\n');
+}
+function renderSheetImage(o){
+  const W=1080, P=64, rows=o.items.length, H=P+120+952+48+150+rows*84+120+P;
+  const c=document.createElement('canvas'); c.width=W; c.height=H; const x=c.getContext('2d');
+  const ink='#1c2523', mute='#66716c', line='#d2d7d1', acc='#8f6b2a';
+  x.fillStyle='#f4f5f1'; x.fillRect(0,0,W,H);
+  x.fillStyle=ink; x.font='600 46px "Noto Serif TC",serif'; x.textBaseline='alphabetic'; x.fillText('手串設計單',P,P+46);
+  const d=new Date(o.createdAt); x.fillStyle=mute; x.font='400 24px "IBM Plex Mono",monospace';
+  x.fillText(`#${o.code}  ${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`,P,P+92);
+  let y=P+120;
+  const g=x.createRadialGradient(W/2,y+380,80,W/2,y+476,700); g.addColorStop(0,'#1d3c39'); g.addColorStop(1,'#0d2120');
+  x.fillStyle=g; rrect(x,P,y,952,952,8); x.fill();
+  x.drawImage(snapshotBoard(952),P,y,952,952); y+=952+48;
+  const stats=[['總價',`NT$${o.total.toLocaleString('en-US')}`],['顆數',`${o.count} 顆`],['串長',`${o.lengthMM} mm`]];
+  stats.forEach(([k,v],i)=>{ const sx=P+i*318; x.fillStyle=mute; x.font='400 24px "Noto Sans TC",sans-serif'; x.fillText(k,sx,y+28);
+    x.fillStyle=i===0?acc:ink; x.font='500 44px "IBM Plex Mono",monospace'; x.fillText(v,sx,y+84); });
+  x.fillStyle=mute; x.font='400 22px "Noto Sans TC",sans-serif'; x.fillText(`手圍 ${o.wristMM/10} cm・${o.fit}・目標 ${o.targetMM} mm`,P,y+124);
+  y+=150; x.strokeStyle=line; x.lineWidth=2; x.beginPath(); x.moveTo(P,y); x.lineTo(W-P,y); x.stroke();
+  o.items.forEach(i=>{ const it=CAT[i.id], sp=sprite(it,5.2,0), cy0=y+42;
+    x.drawImage(sp.cv,P+30-sp.half,cy0-sp.half,sp.half*2,sp.half*2);
+    x.fillStyle=ink; x.font='500 30px "Noto Serif TC",serif'; x.textAlign='left'; x.fillText(i.name,P+84,cy0+2);
+    x.fillStyle=mute; x.font='400 22px "IBM Plex Mono",monospace'; x.fillText(`${i.size} · NT$${i.unit}`,P+84,cy0+32);
+    x.fillStyle=ink; x.font='500 28px "IBM Plex Mono",monospace'; x.textAlign='right';
+    x.fillText(`× ${i.qty}`,W-P-220,cy0+10); x.fillText(`NT$${i.subtotal.toLocaleString('en-US')}`,W-P,cy0+10); x.textAlign='left';
+    y+=84; x.strokeStyle=line; x.lineWidth=1; x.beginPath(); x.moveTo(P,y); x.lineTo(W-P,y); x.stroke(); });
+  x.fillStyle=ink; x.font='600 32px "Noto Sans TC",sans-serif'; x.fillText('合計',P,y+56);
+  x.textAlign='right'; x.fillStyle=acc; x.font='500 40px "IBM Plex Mono",monospace'; x.fillText(`NT$${o.total.toLocaleString('en-US')}`,W-P,y+58); x.textAlign='left';
+  x.fillStyle=mute; x.font='400 20px "Noto Sans TC",sans-serif'; x.fillText(`長度在目標 ±${TOL_MM} mm 內視為合適・價格以實際出貨為準`,P,y+104);
+  return c.toDataURL('image/png');
+}
+let lastOrder=null;
+function openExport(){
+  if(!seq.length) return;
+  const o=buildOrder(); lastOrder=o;
+  try{ document.getElementById('expImg').src=renderSheetImage(o); document.getElementById('expImg').hidden=false; }
+  catch(err){ console.warn('sheet image',err); document.getElementById('expImg').hidden=true; }
+  document.getElementById('expText').value=orderText(o);
+  document.getElementById('submitBtn').hidden=!CONFIG.apiBase;
+  document.getElementById('expNote').textContent=CONFIG.apiBase?'':'部署並接上後端後，這裡會多一個「送出訂單」按鈕。';
+  openSheet(document.getElementById('expSheet'));
+}
+document.getElementById('doneBtn').onclick=openExport;
+document.getElementById('copyBtn').onclick=async()=>{
+  const ta=document.getElementById('expText'), b=document.getElementById('copyBtn');
+  try{ await navigator.clipboard.writeText(ta.value); b.textContent='已複製'; }
+  catch{ ta.focus(); ta.select(); b.textContent='已選取，請按複製'; }
+  setTimeout(()=>b.textContent='複製文字明細',2000);
+};
+document.getElementById('submitBtn').onclick=async()=>{
+  const b=document.getElementById('submitBtn'), n=document.getElementById('expNote');
+  b.disabled=true; n.textContent='送出中…';
+  try{ const r=await DataSource.submitOrder(lastOrder); n.textContent=`已送出，訂單編號 ${r.id||lastOrder.code}`; }
+  catch(err){ n.textContent=err.message+'，請稍後再試。'; b.disabled=false; }
+};
+/* Server catalog (from Notion) replaces the sample one. Items without photos fall back to a drawn bead
+   tinted by their 色系, so a new product shows up before it has been photographed. */
+const COLOR_BASE={clear:[226,233,233],grey:[128,134,138],black:[34,33,36],green:[150,200,120],yellow:[236,188,78],pink:[240,184,196],purple:[150,94,186],blue:[168,210,226]};
+function fromServer(r){
+  const local=CAT[r.id]||{}, kind=r.kind||local.kind||(r.cat==='spacer'?'spacer':r.cat==='ball'?'metal':'gem');
+  const it=Object.assign({},local,r,{kind});
+  it.d=+it.d||8; it.w=+r.w||(kind==='spacer'?2:it.d); it.price=+it.price||0;
+  it.images=r.images||[]; it.info=Object.assign({},local.info||{},r.info||{});
+  if(kind==='gem'&&!it.p) it.p={base:COLOR_BASE[it.color]||[200,200,200],clear:it.color==='black'?0:.5,glow:[255,255,255]};
+  if((kind==='metal'||kind==='spacer')&&!it.tone) it.tone=it.color==='yellow'?GOLD:SILV;
+  return it;
+}
+if(CONFIG.apiBase){
+  document.querySelector('.devbox').hidden=true;
+  DataSource.loadCatalog().then(list=>{
+    const items=list.map(fromServer); if(!items.length) return;
+    ITEMS.length=0; Object.keys(CAT).forEach(k=>delete CAT[k]);
+    items.forEach(it=>{ ITEMS.push(it); CAT[it.id]=it; if(!thumbs[it.id]){ const c=document.createElement('canvas'); c.width=c.height=128; const x=c.getContext('2d'); x.scale(2,2); x.translate(32,32); drawItem(x,it,5); thumbs[it.id]=c.toDataURL(); } });
+    spriteCache.clear(); boardCache=null;
+    const keep=seq.filter(s=>CAT[s.id]); if(keep.length!==seq.length) restore(keep.map(s=>({...s})));
+    onPhotosChanged(); refresh();
+  }).catch(err=>console.warn('catalog',err));
+}
+
+document.querySelectorAll('.view').forEach(v=>v.onclick=()=>setMode(v.dataset.mode));
+document.getElementById('randBtn').onclick=randomPick;
+document.getElementById('shuffleBtn').onclick=shuffleString;
+document.getElementById('centerBtn').onclick=viewReset;
+document.getElementById('flipBtn').onclick=()=>{ view.yawT+=Math.PI; };
+document.getElementById('undoBtn').onclick=()=>{ if(history.length) restore(history.pop()); };
+document.getElementById('clearBtn').onclick=()=>{ if(seq.length){ pushHistory(); restore([]); } };
+document.getElementById('shakeBtn').onclick=shake;
+document.getElementById('selCancel').onclick=()=>select(null);
+document.getElementById('selRemove').onclick=()=>{ if(selected!=null) removeUid(selected); };
+document.getElementById('wrist').onchange=()=>{ boardCache=null; refresh(); };
+document.getElementById('fit').onchange=()=>{ boardCache=null; refresh(); };
+
+new ResizeObserver(layoutStage).observe(stage);
+layoutStage();
+Array.from({length:9},()=>['rut10','spG','peri8']).flat()
+  .forEach(id=>{ const e=mk(id); seq.push(e); spawn(e.uid,e.id,e.v); });
+/* ---------- plugin interface ----------
+   Add-ons (e.g. web/ar.js for AR try-on) use only this object, so the main page can change freely
+   as long as these stay the same. */
+const BeadStudio = window.BeadStudio = {
+  version: 1,
+  stage,                                   // the stage <section>; add-ons may append their own controls
+  get mode(){ return mode; },
+  onModeChange(fn){ modeListeners.push(fn); fn(mode); },
+  // stop drawing and physics while something else (the camera view) needs the phone's GPU
+  setPaused(on){ if(on===paused) return; paused=on; if(on) Runner.stop(runner); else Runner.run(runner,engine); },
+  orderSource: 'web',                      // saved with each order so test pages can be told apart
+};
+setMode('dish'); refresh();
+requestAnimationFrame(frame);
+window.dispatchEvent(new Event('beadstudio:ready'));
+})();
+</script>
+
+<script src="ar.js"></script>
+</body>
+</html>

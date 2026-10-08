@@ -1,0 +1,37 @@
+# 推到 main 時把 web/ 部署到 GitHub Pages
+# 第一次使用：Repo → Settings → Pages → Source 選「GitHub Actions」
+name: Deploy web to GitHub Pages
+on:
+  push:
+    branches: [main]
+    paths: ["src/**", "web/**", "scripts/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build pages from src/
+        run: python3 scripts/build.py
+      - uses: actions/configure-pages@v5
+      # AR 試戴用的手部偵測模型（約數 MB）：部署時下載，和網頁放在同一個網站，載入比較穩定
+      - name: Download hand landmarker model
+        run: |
+          mkdir -p web/models
+          curl -fsSL -o web/models/hand_landmarker.task \
+            https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deployment
+        uses: actions/deploy-pages@v4
