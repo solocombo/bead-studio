@@ -1190,6 +1190,11 @@ const BeadStudio = window.BeadStudio = {
   // stop drawing and physics while something else (the camera view) needs the phone's GPU
   setPaused(on){ if(on===paused) return; paused=on; if(on) Runner.stop(runner); else Runner.run(runner,engine); },
   orderSource: 'web',                      // saved with each order so test pages can be told apart
+  // current design for renderers outside the page (AR): bead list in stringing order, sizes in mm,
+  // v = which photo, gw = this bead's share of any bare cord
+  design(){ return { wristMM:wristMM(), beads:seq.map(s=>{ const it=CAT[s.id]; return {uid:s.uid,id:s.id,kind:it.kind,d:it.d,w:it.w,v:s.v,gw:gw(s.uid)}; }) }; },
+  // bead picture (photo or drawn) as a canvas; mm = real width the canvas covers
+  beadImage(id,v=0){ const it=CAT[id]; if(!it) return null; const sp=sprite(it,12,v); return {canvas:sp.cv,mm:sp.half*2/12}; },
 };
 setMode('dish'); refresh();
 requestAnimationFrame(frame);

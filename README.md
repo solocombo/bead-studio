@@ -112,6 +112,8 @@ AR 是**外掛**：`web/ar.html` 由建置程式自動產生，內容＝正式�
 | `onModeChange(fn)` | 切換檢視時通知 |
 | `setPaused(bool)` | 暫停／恢復畫面繪製與物理模擬 |
 | `orderSource` | 寫進訂單的來源標記 |
+| `design()` | 目前的設計：手圍、依串法順序的珠子（尺寸 mm、照片編號、露繩權重） |
+| `beadImage(id, v)` | 珠子圖片（照片或繪製），回傳 canvas 與它涵蓋的實際寬度 mm |
 
 主程式載入完成時會發出 `beadstudio:ready` 事件。
 
