@@ -1,4 +1,4 @@
-/* 串珠盤 AR 試戴外掛（測試版：第 1 階段）
+/* 串珠盤 AR 試戴外掛（測試版：第 1.1 階段）
    只在 ar.html 載入；正式版 index.html 不會載入這個檔案。
    只透過 window.BeadStudio 介面和主程式溝通（見 src/bead-studio.html 最後面的 plugin interface）。
 
@@ -65,7 +65,7 @@
 .ar-guide{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(70vw,320px);aspect-ratio:3/4;border:2px dashed rgba(255,255,255,.55);border-radius:18px;display:grid;place-items:end center;padding-bottom:14px;box-sizing:border-box;font-size:14px;text-align:center;pointer-events:none}
 .ar-bar{position:absolute;left:0;right:0;bottom:0;padding:12px 16px calc(14px + env(safe-area-inset-bottom,0px));display:flex;justify-content:space-between;align-items:center;gap:8px;background:linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.6))}
 .ar-bar button{padding:10px 14px;border-radius:999px;border:1px solid rgba(255,255,255,.4);background:rgba(0,0,0,.45);color:#fff;font-size:14px}
-.ar-msg{position:absolute;left:16px;right:16px;top:40%;text-align:center;font-size:15px;line-height:1.6}
+.ar-msg{position:absolute;left:16px;right:16px;top:40%;text-align:center;font-size:15px;line-height:1.6;white-space:pre-line;text-shadow:0 1px 3px #000}
 .ar-side{position:absolute;right:12px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px}
 .ar-side button{width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.4);background:rgba(0,0,0,.45);color:#fff;font-size:13px;padding:0}
 .ar-side button[aria-pressed="true"]{background:rgba(216,178,94,.85);color:#111;border-color:transparent}
@@ -183,7 +183,23 @@
     /* 第一次使用要下載約 17 MB（運算核心 9.4 MB＋手部模型 7.5 MB），手機網路可能要十幾秒。
    所以兩個大檔自己下載，才能顯示進度；之後瀏覽器會快取，第二次幾乎不用等。
    onProgress({stage:'download'|'init', loaded, total, text}) */
+    /* 下載大檔並回報進度。
+   - 先查瀏覽器的 Cache Storage：下載過一次就存起來，之後開 AR 幾乎不用等
+   - 伺服器若有壓縮（gzip/br），content-length 是壓縮後大小，會比實際讀到的少，所以不採用 */
+    const CACHE_NAME = "bead-ar-assets-v1";
     async function fetchWithProgress(url, onBytes, stallMs = 20000) {
+      let cache = null;
+      try {
+        cache = await caches.open(CACHE_NAME);
+        const hit = await cache.match(url);
+        if (hit) {
+          const b = new Uint8Array(await hit.arrayBuffer());
+          onBytes(b.length, b.length, true);
+          return b;
+        }
+      } catch {
+        cache = null;
+      }
       const ctrl = new AbortController();
       let timer = setTimeout(() => ctrl.abort(), stallMs);
       const r = await fetch(url, { signal: ctrl.signal });
@@ -191,31 +207,46 @@
         clearTimeout(timer);
         throw new Error(`下載失敗（${r.status}）`);
       }
-      const total = +r.headers.get("content-length") || 0;
+      const total = r.headers.get("content-encoding")
+        ? 0
+        : +r.headers.get("content-length") || 0;
+      let out;
       if (!r.body || !r.body.getReader) {
-        clearTimeout(timer);
-        const b = new Uint8Array(await r.arrayBuffer());
-        onBytes(b.length, b.length);
-        return b;
-      }
-      const reader = r.body.getReader(),
-        parts = [];
-      let got = 0;
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        parts.push(value);
-        got += value.length;
-        onBytes(got, total);
-        clearTimeout(timer);
-        timer = setTimeout(() => ctrl.abort(), stallMs); // 超過 20 秒沒有任何進度才放棄
+        out = new Uint8Array(await r.arrayBuffer());
+      } else {
+        const reader = r.body.getReader(),
+          parts = [];
+        let got = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          parts.push(value);
+          got += value.length;
+          onBytes(got, Math.max(total, got));
+          clearTimeout(timer);
+          timer = setTimeout(() => ctrl.abort(), stallMs); // 超過 20 秒沒有任何進度才放棄
+        }
+        out = new Uint8Array(got);
+        let o = 0;
+        for (const p of parts) {
+          out.set(p, o);
+          o += p.length;
+        }
       }
       clearTimeout(timer);
-      const out = new Uint8Array(got);
-      let o = 0;
-      for (const p of parts) {
-        out.set(p, o);
-        o += p.length;
+      onBytes(out.length, out.length);
+      if (cache) {
+        try {
+          await cache.put(
+            url,
+            new Response(out, {
+              headers: {
+                "Content-Type":
+                  r.headers.get("content-type") || "application/octet-stream",
+              },
+            }),
+          );
+        } catch {}
       }
       return out;
     }
@@ -238,23 +269,34 @@
       const { FilesetResolver, HandLandmarker } = AR.lib;
       const files = await FilesetResolver.forVisionTasks(CONFIG.arWasm);
       // 兩個大檔同時下載，合併計算進度（模型大小在下載前未知時先用 7.5 MB 估）
-      const prog = { wasm: [0, 9.4e6], model: [0, 7.8e6] };
+      // 大小未知（伺服器有壓縮）時用預估值；實際讀到的超過預估就跟著調大
+      const prog = { wasm: [0, 9.4e6], model: [0, 7.8e6] },
+        fromCache = {};
       const tick = () => {
         const l = prog.wasm[0] + prog.model[0],
-          t = prog.wasm[1] + prog.model[1];
+          t =
+            Math.max(prog.wasm[0], prog.wasm[1]) +
+            Math.max(prog.model[0], prog.model[1]);
         say({
           stage: "download",
           loaded: l,
           total: t,
-          text: `下載中 ${MB(l)} / ${MB(t)} MB`,
+          text:
+            fromCache.wasm && fromCache.model
+              ? "讀取快取"
+              : `下載中 ${MB(l)} / ${MB(t)} MB`,
         });
       };
       const wasmJob = (async () => {
         if (!files.wasmBinaryPath || AR.wasmUrl) return;
-        const bytes = await fetchWithProgress(files.wasmBinaryPath, (g, t) => {
-          prog.wasm = [g, t || prog.wasm[1]];
-          tick();
-        });
+        const bytes = await fetchWithProgress(
+          files.wasmBinaryPath,
+          (g, t, c) => {
+            if (c) fromCache.wasm = 1;
+            prog.wasm = [g, t || prog.wasm[1]];
+            tick();
+          },
+        );
         AR.wasmUrl = URL.createObjectURL(
           new Blob([bytes], { type: "application/wasm" }),
         );
@@ -264,7 +306,8 @@
         let lastErr;
         for (const url of [].concat(CONFIG.arModel)) {
           try {
-            AR.modelBuf = await fetchWithProgress(url, (g, t) => {
+            AR.modelBuf = await fetchWithProgress(url, (g, t, c) => {
+              if (c) fromCache.model = 1;
               prog.model = [g, t || prog.model[1]];
               tick();
             });
@@ -751,60 +794,70 @@
     ];
     const W3 = (lm) => [lm.x, lm.y, lm.z];
 
-    /* 手腕姿態。座標：MediaPipe 的 worldLandmarks（公尺，x 右、y 下、z 遠離鏡頭，原點在手的中心）。
-   - 手臂方向 a：中指根 → 手腕，再往前臂延伸
-   - 掌寬方向 u：小指根 → 食指根，扣掉沿 a 的分量
-   - 畫面比例 k（像素／公尺）：同幾段骨頭在畫面上的長度 ÷ 世界座標投影到 xy 的長度，取中位數
-   手鍊中心放在手腕點往前臂 12 mm 的地方。 */
-    function wristPose(img, world, toPx) {
-      const w0 = W3(world[0]),
-        a = norm(sub(w0, W3(world[9])));
-      let u = sub(W3(world[5]), W3(world[17]));
+    /* 手腕姿態（第 1.1 版）
+   MediaPipe 的 worldLandmarks（公尺）只拿來提供「骨頭的真實長度」和「前後方向」；
+   畫面上的方向一律用 2D 偵測點，比較準。相機用針孔模型（真實透視）。
+
+   - 比例：手掌上幾段固定長度（手腕、各指根）在畫面上的長度 ÷ 真實長度。
+           骨頭斜向鏡頭時畫面上會變短，所以取「最不被壓縮」的那段（第二大值，避免單一雜訊）
+   - 深度：知道比例和鏡頭焦距，就能推出手腕離鏡頭多遠
+   - 手臂方向 a：中指根 → 手腕。畫面上看到的長度比真實長度短多少，就代表往前或往後傾斜多少
+   - 掌寬方向 u：小指根 → 食指根，同樣用縮短量判斷手是正面還是側面
+   座標：相機座標（公尺），x 右、y 下、z 朝前（離鏡頭越遠越大）。 */
+    const HFOV = (66 * Math.PI) / 180; // 手機主鏡頭長邊的水平視角，常見 63°～70°
+    const TILT = 0.75; // 手腕彎曲時手掌方向和前臂不同，傾斜量打折，避免手鍊歪太多
+    // MediaPipe world z：預設數值越大離鏡頭越遠。若實測手鍊前後顛倒，網址加 #flipz 即可反轉來比對
+    const Z_SIGN = /flipz/.test(location.hash) ? -1 : 1;
+    const PALM = [0, 5, 9, 13, 17];
+    function wristPose(img, world, cam) {
+      const P = PALM.map((i) => cam.toPx(img[i])),
+        Wd = PALM.map((i) => W3(world[i]));
+      const ratios = [];
+      for (let i = 0; i < 5; i++)
+        for (let j = i + 1; j < 5; j++) {
+          const lw = len(sub(Wd[i], Wd[j]));
+          if (lw < 0.01) continue;
+          ratios.push(Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1]) / lw);
+        }
+      ratios.sort((x, y) => y - x);
+      const k = ratios[1] || ratios[0]; // px per meter at the hand's depth
+      const Z = cam.f / k;
+      const at = (px) => [
+        ((px[0] - cam.ppx) * Z) / cam.f,
+        ((px[1] - cam.ppy) * Z) / cam.f,
+        Z,
+      ];
+      // 3D vector from two landmarks: in-plane part from the image, depth part from the true length
+      const vec3 = (i, j) => {
+        const pi = cam.toPx(img[i]),
+          pj = cam.toPx(img[j]),
+          dx = (pi[0] - pj[0]) / k,
+          dy = (pi[1] - pj[1]) / k;
+        const L = len(sub(W3(world[i]), W3(world[j]))),
+          dz = Math.sqrt(Math.max(0, L * L - dx * dx - dy * dy));
+        return [
+          dx,
+          dy,
+          dz * Math.sign((world[i].z - world[j].z) * Z_SIGN || 1),
+        ];
+      };
+      let h = vec3(0, 9);
+      h = [h[0], h[1], h[2] * TILT];
+      const a = norm(h);
+      let u = vec3(5, 17);
       u = norm(add(u, a, -dot(u, a)));
       const v = cross(a, u);
-      const ratios = [
-        [0, 5],
-        [0, 17],
-        [5, 17],
-        [0, 9],
-        [9, 13],
-        [5, 9],
-      ]
-        .map(([i, j]) => {
-          const p = toPx(img[i]),
-            q = toPx(img[j]),
-            wi = world[i],
-            wj = world[j];
-          const dw = Math.hypot(wi.x - wj.x, wi.y - wj.y);
-          return dw > 1e-4 ? Math.hypot(p[0] - q[0], p[1] - q[1]) / dw : null;
-        })
-        .filter(Boolean)
-        .sort((x, y) => x - y);
-      const k = ratios[Math.floor(ratios.length / 2)];
-      const off = add([0, 0, 0], a, 0.012); // 12 mm toward the elbow
-      const p0 = toPx(img[0]);
-      return {
-        cx: p0[0] + off[0] * k,
-        cy: p0[1] + off[1] * k,
-        cz: off[2] * k,
-        k,
-        a,
-        u,
-        v,
-      };
+      const c = add(at(cam.toPx(img[0])), a, 0.01); // 10 mm toward the elbow
+      return { c, a, u, v };
     }
     function smoothPose(p, t) {
-      const o = {
-        cx: F("cx", p.cx, t, 1.5, 0.008),
-        cy: F("cy", p.cy, t, 1.5, 0.008),
-        cz: p.cz,
-        k: F("k", p.k, t, 0.8, 0.0005),
-      };
-      for (const n of ["a", "u"])
-        o[n] = norm([0, 1, 2].map((i) => F(n + i, p[n][i], t, 1.2, 0.4)));
-      o.u = norm(add(o.u, o.a, -dot(o.u, o.a)));
-      o.v = cross(o.a, o.u);
-      return o;
+      const c = [0, 1, 2].map((i) =>
+        F("c" + i, p.c[i], t, i === 2 ? 0.6 : 1.5, i === 2 ? 0.05 : 0.4),
+      );
+      const a = norm([0, 1, 2].map((i) => F("a" + i, p.a[i], t, 1.2, 0.4)));
+      let u = norm([0, 1, 2].map((i) => F("u" + i, p.u[i], t, 1.2, 0.4)));
+      u = norm(add(u, a, -dot(u, a)));
+      return { c, a, u, v: cross(a, u) };
     }
 
     /* ---------- 3D 手鍊（正交投影，單位＝螢幕像素） ---------- */
@@ -820,7 +873,7 @@
       });
       G.r.setClearColor(0, 0);
       G.scene = new T.Scene();
-      G.cam = new T.OrthographicCamera(0, 1, 0, -1, -5000, 5000);
+      G.cam = new T.OrthographicCamera(0, 1, 0, -1, -1e5, 1e5);
       G.cam.position.z = 0;
       G.group = new T.Group();
       G.scene.add(G.group);
@@ -944,36 +997,45 @@
       );
       G.group.add(G.cord);
     }
-    /* 把手鍊放到手腕上：手腕座標 (u,v) mm → 世界（公尺）→ 螢幕像素。
-   還沒做遮擋：在手腕後面的珠子（z 比手鍊中心遠）先畫成半透明。 */
-    function placeBracelet(pose, cw, ch, scaleAdj) {
+    /* 把手鍊放到手腕上：手腕座標 (u,v) mm → 相機座標（公尺）→ 透視投影到螢幕像素。
+   還沒做遮擋：朝向手腕背面（遠離鏡頭那側）的珠子先畫成半透明。 */
+    function placeBracelet(pose, cam, cw, ch, scaleAdj) {
       G.cam.left = 0;
       G.cam.right = cw;
       G.cam.top = 0;
       G.cam.bottom = -ch;
       G.cam.updateProjectionMatrix();
-      const k = (pose.k * scaleAdj) / 1000; // px per mm
-      const toScreen = (pu, pv) => {
-        const w = add(add([0, 0, 0], pose.u, pu), pose.v, pv); // mm in camera axes
-        return [pose.cx + w[0] * k, pose.cy + w[1] * k, w[2] * k];
+      const toCam = (pu, pv) => {
+        const r = add(
+          add([0, 0, 0], pose.u, (pu * scaleAdj) / 1000),
+          pose.v,
+          (pv * scaleAdj) / 1000,
+        );
+        return [add(pose.c, r), r];
       };
+      const proj = (P) => [
+        cam.ppx + (cam.f * P[0]) / P[2],
+        cam.ppy + (cam.f * P[1]) / P[2],
+      ];
       for (const s of G.items) {
         const { b, mm } = s.userData,
-          p = toScreen(b.pu, b.pv),
-          behind = p[2] > 0;
-        const size = mm * k * (1 - p[2] / (4 * k * 100)); // slight perspective: far side a little smaller
-        s.position.set(p[0], -p[1], -p[2]);
+          [P, r] = toCam(b.pu, b.pv),
+          q = proj(P);
+        const behind = dot(r, P) > 0; // surface normal points away from the camera
+        const size = (((mm * scaleAdj) / 1000) * cam.f) / P[2];
+        s.position.set(q[0], -q[1], -P[2] * 1000);
         s.scale.set(size, size, 1);
-        s.material.opacity = behind ? 0.32 : 1;
+        s.material.opacity = behind ? 0.3 : 1;
         if (b.kind === "spacer") {
-          const q = toScreen(b.pu + b.tu, b.pv + b.tv);
-          s.material.rotation = Math.atan2(-(q[1] - p[1]), q[0] - p[0]);
+          const q2 = proj(toCam(b.pu + b.tu, b.pv + b.tv)[0]);
+          s.material.rotation = Math.atan2(-(q2[1] - q[1]), q2[0] - q[0]);
         }
       }
       const pos = G.cord.geometry.attributes.position;
       G.layout.cord.forEach(([pu, pv], i) => {
-        const p = toScreen(pu, pv);
-        pos.setXYZ(i, p[0], -p[1], -p[2] - 1);
+        const [P] = toCam(pu, pv),
+          q = proj(P);
+        pos.setXYZ(i, q[0], -q[1], -P[2] * 1000 - 1);
       });
       pos.needsUpdate = true;
     }
@@ -1003,18 +1065,54 @@
       $("arShot").hidden = true;
       BS.setPaused(true);
       arMsg("");
-      $("arHudL").textContent = "準備相機…";
+      $("arHudL").textContent = "開啟相機…";
       $("arHudR").textContent = "";
+      const token = (AR.session = (AR.session || 0) + 1);
+      // 先開相機，讓使用者馬上看到畫面；AR 元件同時在背景載入
+      const cam = openCamera().then(
+        () => null,
+        (e) => e,
+      );
+      const loading = !AR.lm;
+      if (loading) {
+        $("arGuide").hidden = true;
+        arMsg("載入 AR 元件中…");
+      }
+      let err = null;
       try {
         await loadLandmarker((p) => {
+          if (token !== AR.session) return;
+          const pct =
+            p.stage === "download" && p.total
+              ? Math.min(99, Math.round((100 * p.loaded) / p.total))
+              : p.stage === "init"
+                ? 99
+                : 0;
           $("arHudL").textContent =
             p.text === "連線中" ? "準備 AR 元件…" : p.text;
+          if (loading)
+            arMsg(
+              p.stage === "init"
+                ? "即將完成…"
+                : `載入 AR 元件 ${pct}%\n第一次使用要下載約 17 MB，之後就不用再等`,
+            );
         });
         initGl();
         buildBracelet();
-        $("arHudL").textContent = "開啟相機…";
-        await openCamera();
       } catch (e) {
+        err = e;
+      }
+      const camErr = await cam;
+      if (token !== AR.session || $("arView").hidden) {
+        // 使用者已經關掉了：相機若剛打開也要關
+        if ($("arView").hidden && AR.stream) {
+          AR.stream.getTracks().forEach((t) => t.stop());
+          AR.stream = null;
+        }
+        return;
+      }
+      const e = camErr || err;
+      if (e) {
         console.warn("AR start", e);
         const n = e && e.name;
         arMsg(
@@ -1024,10 +1122,16 @@
               ? "找不到可用的相機。"
               : n === "NotReadableError"
                 ? "相機被其他 App 佔用中，請關閉其他使用相機的 App 再試一次。"
-                : "無法開啟試戴：" + ((e && e.message) || e),
+                : !camErr
+                  ? "AR 元件載入失敗：" +
+                    ((e && e.message) || e) +
+                    "\n請確認網路後重新開啟試戴。"
+                  : "無法開啟相機：" + ((e && e.message) || e),
         );
         return;
       }
+      arMsg("");
+      $("arGuide").hidden = false;
       if (!G.layout) arMsg("盤中還沒有珠子。先回去設計一條，再來試戴。");
       AR.running = true;
       AR.fps = [];
@@ -1036,6 +1140,7 @@
     }
     function stopAR() {
       AR.running = false;
+      AR.session = (AR.session || 0) + 1;
       if (AR.stream) {
         AR.stream.getTracks().forEach((t) => t.stop());
         AR.stream = null;
@@ -1072,6 +1177,13 @@
           ox = (cw - vw * sc) / 2,
           oy = (ch - vh * sc) / 2;
         const toPx = (l) => [ox + l.x * vw * sc, oy + l.y * vh * sc];
+        // pinhole camera in CSS px: principal point = video centre, focal length from a typical phone FOV
+        const cam = {
+          toPx,
+          ppx: ox + (vw * sc) / 2,
+          ppy: oy + (vh * sc) / 2,
+          f: (Math.max(vw, vh) * sc) / (2 * Math.tan(HFOV / 2)),
+        };
         arCtx.clearRect(0, 0, arCv.width, arCv.height);
         const hand = res.landmarks && res.landmarks[0],
           world = res.worldLandmarks && res.worldLandmarks[0];
@@ -1079,8 +1191,8 @@
         if (hand && world) {
           AR.lastSeen = now;
           if (G.layout) {
-            AR.pose = smoothPose(wristPose(hand, world, toPx), now);
-            placeBracelet(AR.pose, cw, ch, AR.scale);
+            AR.pose = smoothPose(wristPose(hand, world, cam), now);
+            placeBracelet(AR.pose, cam, cw, ch, AR.scale);
             G.group.visible = true;
           }
           if (AR.skel) {
