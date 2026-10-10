@@ -137,6 +137,17 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outlin
 .exp-btns{display:flex;gap:8px;flex-wrap:wrap}
 .exp-text{width:100%;box-sizing:border-box;min-height:150px;font-family:var(--f-num);font-size:12px;line-height:1.6;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:10px;resize:vertical}
 @media (min-width:860px){ .sheet{align-items:center} .sheet-card{border-radius:8px} }
+.sheet.light .sheet-back{background:transparent}
+.mb-card{max-height:48%;box-shadow:0 -8px 30px rgba(0,0,0,.25)}
+.mb-body{display:flex;flex-direction:column;gap:12px}
+.mb-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.mb-lbl{width:2.6em;flex:none;color:var(--muted);font-size:13px}
+.mb-chips{display:flex;gap:6px;flex-wrap:wrap}
+.mb-chip{border:1px solid var(--line);background:transparent;padding:6px 12px;border-radius:999px;font-size:13px}
+.mb-chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.mb-sw{width:28px;height:28px;border-radius:50%;border:1px solid rgba(0,0,0,.2);padding:0}
+.mb-sw[aria-pressed="true"]{box-shadow:0 0 0 2px var(--surface),0 0 0 3.5px var(--accent)}
+.mbbtn{border:1px solid rgba(220,200,150,.4);background:rgba(6,18,17,.7);color:#f3e8cc;border-radius:999px;padding:7px 12px;font-family:var(--f-display);font-weight:600;font-size:13px}
 </style>
 
 <div class="app">
@@ -198,6 +209,7 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outlin
     <div class="tool bl">
       <span class="hint" id="hint"></span>
       <div class="tones" id="tones" hidden></div>
+      <button class="mbbtn" id="mbBtn" hidden>人模設定</button>
       <div class="len" aria-live="polite"><b id="lenMain">還差約 0 mm</b><small id="lenSub">目標 175 mm</small></div>
     </div>
   </section>
@@ -233,6 +245,15 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outlin
       <span>只在這台裝置暫時預覽，重新整理就會消失。部署後這裡會改成上傳到後端。照片請用去背 PNG、正方形、珠子置中並佔畫面寬度約 90%。</span>
     </div>
     <p class="note">介紹文字為範例內容，上線前請換成你的商品資料。</p>
+  </div>
+</div>
+
+<div class="sheet light" id="mbSheet" hidden role="dialog" aria-modal="true" aria-labelledby="mbTitle">
+  <div class="sheet-back" data-close></div>
+  <div class="sheet-card mb-card">
+    <button class="sheet-x" data-close aria-label="關閉">×</button>
+    <div class="info-head"><h2 id="mbTitle">人模設定</h2><div class="meta">改了就會套用，可以邊看邊調</div></div>
+    <div id="mbBody" class="mb-body"></div>
   </div>
 </div>
 
@@ -857,12 +878,6 @@ function hitNeck(p){
     if(d<Math.max(Math.max(it.d,it.w)/2*g.Sb,14/NV.z)&&d<bd){ bd=d; best=s; } }
   return best;
 }
-function drawNeckWear(){
-  ctx.fillStyle='rgba(239,227,196,.9)'; ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.font=`600 ${Math.max(15,side*.045)}px "Noto Serif TC",serif`; ctx.fillText('項鍊試戴人模製作中',cx,cy-16);
-  ctx.font=`400 ${Math.max(12,side*.033)}px "Noto Sans TC",sans-serif`; ctx.fillStyle='rgba(239,227,196,.7)';
-  ctx.fillText('下一階段：男女半身、髮型、襯衫／圓領／V 領',cx,cy+16); ctx.textBaseline='alphabetic';
-}
 
 /* ---------- 戴上看: 3D hand you can turn over ---------- */
 const gl=document.getElementById('gl'), w3msg=document.getElementById('w3msg');
@@ -870,8 +885,12 @@ const SKINS=[['#e7b796','淺膚色'],['#c98d66','小麥色'],['#86553a','深膚�
 let skin=0;
 const W3={ready:false};
 const view={yaw:0,yawT:0,pitch:.12,dist:500,tx:0,ty:55};
-function viewReset(){ view.yawT=Math.round(view.yaw/TAU)*TAU; view.pitch=.12; view.dist=500; view.tx=0; view.ty=55; }
-function viewClamp(){ const k=wristMM()/160;
+function viewReset(){ view.yawT=Math.round(view.yaw/TAU)*TAU;
+  if(isNeck()){ view.pitch=.06; view.dist=1250; view.tx=0; view.ty=40; } else { view.pitch=.12; view.dist=500; view.tx=0; view.ty=55; } }
+function viewClamp(){
+  if(isNeck()){ view.pitch=Math.max(-.9,Math.min(.9,view.pitch)); view.dist=Math.max(260,Math.min(1500,view.dist));
+    view.ty=Math.max(-260,Math.min(260,view.ty)); view.tx=Math.max(-200,Math.min(200,view.tx)); return; }
+  const k=wristMM()/160;
   view.pitch=Math.max(-1.1,Math.min(1.1,view.pitch)); view.dist=Math.max(170,Math.min(900,view.dist));
   view.ty=Math.max(-170*k,Math.min(200*k,view.ty)); view.tx=Math.max(-110,Math.min(110,view.tx)); }
 function init3D(){
@@ -1031,6 +1050,8 @@ const _v1=window.THREE?new THREE.Vector3():null, _v2=window.THREE?new THREE.Vect
 function render3D(){
   if(!init3D()){ w3msg.hidden=false; w3msg.textContent='3D 元件載入失敗，請重新整理'; return; }
   if(W3.size!==side){ W3.size=side; W3.r.setSize(side,side,false); gl.style.width=gl.style.height=side+'px'; }
+  if(isNeck()) return renderBust();
+  if(BU.group) BU.group.visible=false; W3.root.visible=true;
   buildHand(); buildBeads();
   view.yaw+=(view.yawT-view.yaw)*(reduceMotion?1:.14);
   W3.root.rotation.y=view.yaw;
@@ -1047,6 +1068,230 @@ function render3D(){
 const tonesEl=document.getElementById('tones');
 SKINS.forEach(([c,l],i)=>{ const b=document.createElement('button'); b.className='tone'; b.style.background=c; b.title=l; b.setAttribute('aria-label',l);
   b.setAttribute('aria-pressed',i===skin); b.onclick=()=>{ skin=i; tonesEl.querySelectorAll('.tone').forEach((t,j)=>t.setAttribute('aria-pressed',j===i)); }; tonesEl.appendChild(b); });
+
+/* ---------- 項鍊人模（N2）＋項鍊下垂（N3） ----------
+   無臉展示假人：頭、頸、肩、胸用平滑造形（SDF）組成，和手模同一套做法。
+   單位 mm，y 往上、z 朝前（臉的方向），原點在脖子根部附近。
+   衣服＝身體往外長 3 mm 再挖掉領口；頭髮另外一個網格，蓋在身體外面。
+   項鍊：把扣頭、鍊條或串線、珠子串成一圈相連的點，受重力往下掉、不能穿進身體（簡單物理模擬）。 */
+const MB={sex:'f', hair:'long', hairColor:'#2a201b', neckline:'crew', cloth:'#ece8e1', neckCM:33};
+const HAIRS={f:[['long','長直髮'],['bob','鮑伯短髮'],['up','綁起來']], m:[['short','短髮'],['medium','中長髮']]};
+const HAIR_COLORS=[['#1c1917','黑'],['#3b2a20','深棕'],['#6b4a32','棕'],['#b8935a','金'],['#bdb8b0','灰白']];
+const NECKLINES=[['crew','圓領'],['v','V 領'],['shirt','襯衫'],['none','不穿']];
+const CLOTHS=[['#ece8e1','白'],['#232526','黑'],['#8b8f91','灰'],['#2b3a55','藏青'],['#d6c3a5','米']];
+const sdEll=(x,y,z,a,b,c)=>{ const k0=Math.hypot(x/a,y/b,z/c), k1=Math.hypot(x/(a*a),y/(b*b),z/(c*c)); return k1>1e-9?k0*(k0-1)/k1:-Math.min(a,b,c); };
+function bustParams(){ const f=MB.sex==='f';
+  return {f, nr:MB.neckCM*10/(2*Math.PI), sh:f?172:200, cw:f?138:162, cd:f?92:108, hs:f?.94:1}; }
+/* torso + neck (no head): used for clothes and for the necklace collisions */
+function torsoSDF(P){
+  const sh=P.sh, nr=P.nr, cw=P.cw, cd=P.cd, A=[-sh+46,-40,-8], B=[sh-46,-40,-8];
+  const armL=[-(sh-38),-48,-6], armL2=[-(sh-26),-240,-12], armR=[sh-38,-48,-6], armR2=[sh-26,-240,-12];
+  const trL=[-nr*.55,8,-14], trL2=[-(sh-70),-32,-10], trR=[nr*.55,8,-14], trR2=[sh-70,-32,-10];
+  const nA=[0,-45,-8], nB=[0,130,-2];
+  return (x,y,z)=>{
+    let d=sdEll(x,y+150,z,cw,190,cd);
+    d=smin(d,sdRoundCone(x,y,z,A,B,46,46),42);
+    d=smin(d,sdRoundCone(x,y,z,armL,armL2,50,43),26); d=smin(d,sdRoundCone(x,y,z,armR,armR2,50,43),26);
+    d=smin(d,sdRoundCone(x,y,z,trL,trL2,26,32),24); d=smin(d,sdRoundCone(x,y,z,trR,trR2,26,32),24);
+    if(P.f){ d=smin(d,Math.hypot(x-58,y+140,z-52)-58,34); d=smin(d,Math.hypot(x+58,y+140,z-52)-58,34); }
+    else { d=smin(d,sdEll(x-62,y+108,z-58,70,40,38),30); d=smin(d,sdEll(x+62,y+108,z-58,70,40,38),30); }
+    d=smin(d,sdRoundCone(x,y,z,nA,nB,nr*1.1,nr),20);
+    return Math.max(d,-(y+300));
+  };
+}
+function headCenter(P){ return [0,196*P.hs+(P.f?0:6),6]; }
+function bodySDF(P){
+  const t=torsoSDF(P), hc=headCenter(P), s=P.hs;
+  return (x,y,z)=>{
+    let d=t(x,y,z);
+    const h=smin(sdEll(x-hc[0],y-hc[1],z-hc[2],72*s,100*s,88*s),sdEll(x,y-(hc[1]-48*s),z-(hc[2]+16*s),55*s,52*s,58*s),26);
+    return smin(d,h,22);
+  };
+}
+/* exact distance to a 3D triangle (Inigo Quilez) */
+function udTri(px,py,pz,[a,b,c]){
+  const sub=(u,v)=>[u[0]-v[0],u[1]-v[1],u[2]-v[2]], dot=(u,v)=>u[0]*v[0]+u[1]*v[1]+u[2]*v[2],
+    cr=(u,v)=>[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]], cl=x=>Math.max(0,Math.min(1,x)), p=[px,py,pz];
+  const ba=sub(b,a), pa=sub(p,a), cb=sub(c,b), pb=sub(p,b), ac=sub(a,c), pc=sub(p,c), n=cr(ba,ac);
+  const sgn=Math.sign(dot(cr(ba,n),pa))+Math.sign(dot(cr(cb,n),pb))+Math.sign(dot(cr(ac,n),pc));
+  if(sgn<2){ const e=(u,v)=>{ const h=cl(dot(u,v)/dot(u,u)); return (u[0]*h-v[0])**2+(u[1]*h-v[1])**2+(u[2]*h-v[2])**2; };
+    return Math.sqrt(Math.min(e(ba,pa),e(cb,pb),e(ac,pc))); }
+  return Math.abs(dot(n,pa))/Math.sqrt(dot(n,n));
+}
+function clothesSDF(P){
+  const t=torsoSDF(P), nr=P.nr, ring=nr+30, kind=MB.neckline;
+  // shirt: V opening down to yV, collar points lying on the chest (clockwise quads in x,y)
+  const yV=kind==='v'?-118:-92, k=kind==='v'?.56:.32, ve=y=>(y-yV)*k;
+  // collar points: two triangle plates per side, laid 7mm above the chest
+  const surf=(x,y)=>{ let z=200; for(let i=0;i<80;i++){ const d=t(x,y,z); if(d<.3) break; z-=Math.max(d,.5); } return [x,y,z+7]; };
+  const PL=[];
+  if(kind==='shirt') for(const sg of [-1,1]){ const A=surf(sg*13,-34), B=surf(sg*(nr*.62+12),-76), C=surf(sg*(nr*.92),4), D=surf(sg*21,0);
+    PL.push([A,B,C],[A,C,D]); }
+  return (x,y,z)=>{
+    const tv=t(x,y,z); let c=tv-3;
+    const rho=Math.hypot(x,z+6);
+    // region that stays bare: around the neck above the neckline (positive = bare)
+    const yLine=kind==='crew'?-12-22*Math.max(0,Math.min(1,z/70)):kind==='shirt'?4:-6-10*Math.max(0,Math.min(1,z/70));
+    let bare=Math.min((kind==='shirt'?nr+16:ring)-rho,y-yLine);
+    if(kind==='v'||kind==='shirt') bare=Math.max(bare,Math.min(z-8,y-yV,ve(y)-Math.abs(x)));
+    c=-smin(-c,-bare,8);                                         // smooth edge along the neckline
+    if(kind==='shirt'){
+      // collar stand: a slightly flared band around the neck, open at the front
+      const rr=Math.hypot(x,z+4), top=34-26*Math.max(0,Math.min(1,(z+4)/rr));   // taller at the back
+      const band=Math.max(Math.abs(rr-(nr+12+(18-y)*.16))-4,Math.max(-6-y,y-top),Math.min(z-10,15-Math.abs(x)));
+      let pts=1e9; if(z>0&&y<12) for(const T of PL) pts=Math.min(pts,udTri(x,y,z,T)-3.6);
+      c=Math.min(c,smin(band,pts,6));
+    }
+    return c;
+  };
+}
+function hairSDF(P){
+  const hc=headCenter(P), s=P.hs, st=MB.hair, nr=P.nr;
+  const head=(x,y,z,g)=>sdEll(x-hc[0],y-hc[1],z-hc[2],72*s+g,100*s+g,88*s+g);
+  const face=(x,y,z)=>Math.min(z-(hc[2]+8),hc[1]+46*s-x*x/170-y);   // positive = face area (curved hairline), stays bare
+  return (x,y,z)=>{
+    let d;
+    if(st==='short'){ const back=Math.max(0,Math.min(1,(hc[2]-z-10)/70)); d=Math.max(head(x,y,z,7),hc[1]-28-44*back-y); }
+    else if(st==='medium'){ d=Math.max(head(x,y,z,12),hc[1]-80*s-y); }
+    else if(st==='up'){ d=Math.max(head(x,y,z,8),hc[1]-40*s-y); d=smin(d,Math.hypot(x,y-(hc[1]+30*s),z-(hc[2]-88*s))-40,14); }
+    else if(st==='bob'){ d=smin(head(x,y,z,13),sdEll(x,y-(hc[1]-52*s),z-(hc[2]-10),94*s,62*s,88*s),24); d=Math.max(d,hc[1]-108*s-y); }
+    else { // long: cap + strands falling down the back, standing off the neck and shoulders
+      d=smin(head(x,y,z,12),sdEll(x,y-(hc[1]-60*s),z-(hc[2]-16),90*s,80*s,84*s),26);
+      for(const xo of [-52,-18,18,52]) d=smin(d,sdRoundCone(x,y,z,[xo*.8,hc[1]-40,hc[2]-60],[xo*1.15,-95,-nr-44-Math.abs(xo)*.1],30,22),22);
+      if(y<hc[1]-30) d+=1.3*Math.sin(x*.33+z*.05)*Math.min(1,(hc[1]-30-y)/40);   // strand grooves
+      d=Math.max(d,-(y+115+10*Math.sin(x*.06)));
+    }
+    return -smin(-d,-face(x,y,z),5);
+  };
+}
+function meshFrom(f,min,max,h,mat){
+  const m=surfaceNets(f,min,max,h), T3=W3.T3, geo=new T3.BufferGeometry();
+  geo.setAttribute('position',new T3.BufferAttribute(m.pos,3)); geo.setAttribute('normal',new T3.BufferAttribute(m.nrm,3));
+  geo.setIndex(m.idx.length>65535?new T3.Uint32BufferAttribute(m.idx,1):new T3.Uint16BufferAttribute(m.idx,1));
+  return new T3.Mesh(geo,mat);
+}
+const BU={keys:{},group:null};
+function swapMesh(name,mesh){ if(BU[name]){ BU.group.remove(BU[name]); BU[name].geometry.dispose(); } BU[name]=mesh; if(mesh) BU.group.add(mesh); }
+function buildBust(){
+  const T3=W3.T3;
+  if(!BU.group){ BU.group=new T3.Group(); W3.scene.add(BU.group);
+    BU.skin=new T3.MeshStandardMaterial({roughness:.62}); BU.hairMat=new T3.MeshStandardMaterial({roughness:.55});
+    BU.clothMat=new T3.MeshStandardMaterial({roughness:.92,side:T3.DoubleSide});
+    BU.necklace=new T3.Group(); BU.group.add(BU.necklace); }
+  const P=bustParams(), kb=MB.sex+MB.neckCM, kc=kb+MB.neckline, kh=kb+MB.hair;
+  let busy=false;
+  if(BU.keys.body!==kb){ BU.keys.body=kb; swapMesh('body',meshFrom(bodySDF(P),[-235,-300,-135],[235,330,150],7,BU.skin)); busy=true; }
+  if(BU.keys.cloth!==kc){ BU.keys.cloth=kc; swapMesh('cloth',MB.neckline==='none'?null:meshFrom(clothesSDF(P),[-240,-302,-140],[240,40,150],6,BU.clothMat)); busy=true; }
+  if(BU.keys.hair!==kh){ BU.keys.hair=kh; swapMesh('hair',meshFrom(hairSDF(P),[-135,-125,-150],[135,345,140],6,BU.hairMat)); busy=true; }
+  BU.skin.color.set(SKINS[skin][0]).convertSRGBToLinear(); BU.hairMat.color.set(MB.hairColor).convertSRGBToLinear(); BU.clothMat.color.set(MB.cloth).convertSRGBToLinear();
+  return busy;
+}
+
+/* ---- 項鍊下垂：position-based dynamics ---- */
+const NS={key:'',nodes:[],steps:0,sprites:[]};
+if(location.hash==='#debug') window.__bs={BU,MB,NS,clothesSDF,torsoSDF,bustParams};
+function necklaceNodes(){
+  const T=neckCM()*10, cw=claspW(), bw=beadsW(), L=Math.max(T,bw+cw), fill=Math.max(0,L-bw-cw);
+  const ch=NK.chain&&CAT[NK.chain]?CAT[NK.chain]:null, nodes=[];
+  const filler=len=>{ const n=Math.max(0,Math.round(len/4)); for(let i=0;i<n;i++) nodes.push({w:len/n,kind:ch?'chain':'wire',it:ch,r:ch?1.6:1}); };
+  if(NK.clasp&&CAT[NK.clasp]){ const it=CAT[NK.clasp]; nodes.push({w:it.w,kind:'clasp',it,r:it.d/2}); }
+  filler(fill/2);
+  for(const s of seq){ const it=CAT[s.id]; nodes.push({w:it.w,kind:it.kind==='pendant'?'pendant':'bead',it,v:s.v,r:it.kind==='pendant'?2:Math.max(it.d,it.w)/2}); }
+  filler(fill/2);
+  return {nodes,L:nodes.reduce((a,n)=>a+n.w,0)};
+}
+function initNecklace(){
+  const P=bustParams(), {nodes,L}=necklaceNodes(), R=Math.max(L/TAU,P.nr+8);
+  let s=0; nodes.forEach((n,i)=>{ const a=(s+n.w/2)/L*TAU; s+=n.w;
+    // index 0 (clasp) at the back, going round so the strand's middle ends up at the front
+    const p=[Math.sin(a)*R,6,-Math.cos(a)*R-6]; n.p=p; n.q=p.slice(); });
+  NS.nodes=nodes; NS.rest=nodes.map((n,i)=>(n.w+nodes[(i+1)%nodes.length].w)/2); NS.steps=0; NS.csdf=MB.neckline==='none'?torsoSDF(P):(()=>{ const t=torsoSDF(P), c=clothesSDF(P); return (x,y,z)=>Math.min(t(x,y,z),c(x,y,z)); })();
+}
+function simNecklace(maxSteps){
+  const N=NS.nodes, f=NS.csdf, g=9800*(1/120)**2; if(!N.length) return false;
+  let moved=0;
+  for(let st=0;st<maxSteps&&NS.steps<700;st++,NS.steps++){
+    for(const n of N){ const p=n.p, v=[(p[0]-n.q[0])*.985,(p[1]-n.q[1])*.985,(p[2]-n.q[2])*.985]; n.q=p.slice(); p[0]+=v[0]; p[1]+=v[1]-g; p[2]+=v[2]; }
+    for(let it=0;it<8;it++){
+      for(let i=0;i<N.length;i++){ const a=N[i].p, b=N[(i+1)%N.length].p, dx=b[0]-a[0], dy=b[1]-a[1], dz=b[2]-a[2], d=Math.hypot(dx,dy,dz)||1e-6, k=(d-NS.rest[i])/d*.5;
+        a[0]+=dx*k; a[1]+=dy*k; a[2]+=dz*k; b[0]-=dx*k; b[1]-=dy*k; b[2]-=dz*k; }
+      for(const n of N){ const p=n.p, d=f(p[0],p[1],p[2])-n.r; if(d>=0) continue;
+        const e=.6, gx=f(p[0]+e,p[1],p[2])-f(p[0]-e,p[1],p[2]), gy=f(p[0],p[1]+e,p[2])-f(p[0],p[1]-e,p[2]), gz=f(p[0],p[1],p[2]+e)-f(p[0],p[1],p[2]-e), gl=Math.hypot(gx,gy,gz)||1;
+        p[0]-=gx/gl*d; p[1]-=gy/gl*d; p[2]-=gz/gl*d; n.contact=1;
+        n.q=[p[0]-(p[0]-n.q[0])*.4,p[1]-(p[1]-n.q[1])*.4,p[2]-(p[2]-n.q[2])*.4]; }   // friction
+    }
+    moved=0; for(const n of N) moved=Math.max(moved,Math.hypot(n.p[0]-n.q[0],n.p[1]-n.q[1],n.p[2]-n.q[2]));
+    if(NS.steps>120&&moved<.02){ NS.steps=700; break; }
+  }
+  return NS.steps<700;
+}
+let linkTexCache={};
+function linkTex(tone){ const k=tone[2]; if(linkTexCache[k]) return linkTexCache[k];
+  const c=document.createElement('canvas'); c.width=c.height=32; const x=c.getContext('2d'); x.strokeStyle=metalGrad(x,0,8,0,24,tone); x.lineWidth=5; x.beginPath(); x.ellipse(16,16,13,7,0,0,TAU); x.stroke();
+  const t=new W3.T3.CanvasTexture(c); t.encoding=W3.T3.sRGBEncoding; return linkTexCache[k]=t; }
+function buildNecklaceSprites(){
+  const T3=W3.T3; BU.necklace.clear(); NS.sprites=[];
+  for(const n of NS.nodes){
+    let mat;
+    if(n.kind==='wire') continue;
+    if(n.kind==='chain') mat=new T3.SpriteMaterial({map:linkTex(n.it.tone||GOLD),transparent:true});
+    else { const bt=beadTex(n.it,n.v||0); mat=new T3.SpriteMaterial({map:bt.tex,transparent:true}); n.mm=bt.mm; }
+    const s=new T3.Sprite(mat); s.userData.n=n; BU.necklace.add(s); NS.sprites.push(s);
+  }
+  NS.line=new T3.LineLoop(new T3.BufferGeometry().setFromPoints(NS.nodes.map(()=>new T3.Vector3())),new T3.LineBasicMaterial({color:NK.chain&&CAT[NK.chain]?CAT[NK.chain].tone[1]:0xcfc3a8}));
+  BU.necklace.add(NS.line);
+}
+function placeNecklace(cam){
+  const N=NS.nodes, pos=NS.line.geometry.attributes.position, f=NS.csdf;
+  N.forEach((n,i)=>pos.setXYZ(i,n.p[0],n.p[1],n.p[2])); pos.needsUpdate=true;
+  for(const s of NS.sprites){ const n=s.userData.n, i=N.indexOf(n), a=N[(i-1+N.length)%N.length].p, b=N[(i+1)%N.length].p;
+    if(n.kind==='pendant'){ const e=.6, p=n.p, gx=f(p[0]+e,p[1],p[2])-f(p[0]-e,p[1],p[2]), gz=f(p[0],p[1],p[2]+e)-f(p[0],p[1],p[2]-e), gl=Math.hypot(gx,gz)||1;
+      s.position.set(p[0]+gx/gl*n.it.d*.18,p[1]-n.it.d/2,p[2]+gz/gl*n.it.d*.18); s.scale.set(n.mm,n.mm,1); s.material.rotation=0; continue; }
+    s.position.set(n.p[0],n.p[1],n.p[2]);
+    const sz=n.kind==='chain'?n.w*1.9:n.mm; s.scale.set(sz,sz,1);
+    if(n.kind==='chain'||n.kind==='clasp'||n.it.kind==='spacer'){
+      _v1.set(a[0],a[1],a[2]).applyMatrix4(BU.group.matrixWorld).project(cam); _v2.set(b[0],b[1],b[2]).applyMatrix4(BU.group.matrixWorld).project(cam);
+      s.material.rotation=Math.atan2(_v2.y-_v1.y,_v2.x-_v1.x)+(n.kind==='chain'&&i%2?Math.PI/2:0); }
+  }
+}
+function necklaceKey(){ return [seq.map(s=>s.id+':'+s.v).join(','),NK.clasp,NK.chain,neckCM(),MB.sex,MB.neckCM,MB.neckline].join('|'); }
+function bustStale(){ const kb=MB.sex+MB.neckCM; return !BU.group||BU.keys.body!==kb||BU.keys.cloth!==kb+MB.neckline||BU.keys.hair!==kb+MB.hair; }
+function renderBust(){
+  if(W3.root) W3.root.visible=false;
+  // building the meshes takes a moment: show a note first, build on the next frame
+  if(bustStale()&&!BU.pending){ BU.pending=true; w3msg.hidden=false; w3msg.textContent='建立人模中…'; if(BU.group) W3.r.render(W3.scene,W3.camera); return; }
+  BU.pending=false;
+  const t0=performance.now(); if(buildBust()) BU.buildMs=performance.now()-t0; BU.group.visible=true;
+  const k=necklaceKey(); if(k!==NS.key){ NS.key=k; initNecklace(); buildNecklaceSprites(); }
+  simNecklace(reduceMotion?700:40);
+  view.yaw+=(view.yawT-view.yaw)*(reduceMotion?1:.14);
+  BU.group.rotation.y=view.yaw;
+  const cam=W3.camera; cam.position.set(view.tx,view.ty+Math.sin(view.pitch)*view.dist,Math.cos(view.pitch)*view.dist); cam.lookAt(view.tx,view.ty,0);
+  W3.scene.updateMatrixWorld(); placeNecklace(cam);
+  W3.r.render(W3.scene,cam);
+  const msg=!seq.length&&!NK.chain?'還沒有珠子可以戴':'';
+  w3msg.hidden=!msg; w3msg.textContent=msg;
+}
+
+/* 人模設定面板 */
+function chipRow(label,items,cur,on,swatch){
+  return `<div class="mb-row"><span class="mb-lbl">${label}</span><div class="mb-chips">${items.map(([v,l])=>
+    `<button class="${swatch?'mb-sw':'mb-chip'}" data-v="${v}" aria-pressed="${v===cur}" ${swatch?`style="background:${v}" title="${l}" aria-label="${l}"`:''}>${swatch?'':l}</button>`).join('')}</div></div>`;
+}
+function renderMB(){
+  const box=document.getElementById('mbBody');
+  box.innerHTML=chipRow('性別',[['f','女'],['m','男']],MB.sex)+chipRow('髮型',HAIRS[MB.sex],MB.hair)+chipRow('髮色',HAIR_COLORS,MB.hairColor,0,1)
+    +chipRow('領口',NECKLINES,MB.neckline)+chipRow('衣服',CLOTHS,MB.cloth,0,1)
+    +`<div class="mb-row"><label class="mb-lbl" for="mbNeck">頸圍</label><select id="mbNeck">${Array.from({length:14},(_,i)=>29+i).map(c=>`<option value="${c}"${c===MB.neckCM?' selected':''}>${c} cm</option>`).join('')}</select><span class="note">同樣的項鍊長度，頸圍越粗戴起來越高</span></div>`;
+  const keys=['sex','hair','hairColor','neckline','cloth'];
+  box.querySelectorAll('.mb-chips').forEach((row,i)=>row.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    const k=keys[i]; MB[k]=b.dataset.v;
+    if(k==='sex'){ MB.hair=HAIRS[MB.sex][0][0]; MB.neckCM=MB.sex==='f'?33:38; }
+    if(!BU.group) w3msg.hidden=false;
+    renderMB(); }));
+  document.getElementById('mbNeck').onchange=e=>{ MB.neckCM=+e.target.value; };
+}
+document.getElementById('mbBtn').onclick=()=>{ renderMB(); openSheet(document.getElementById('mbSheet')); };
 
 /* ---------- shared render ---------- */
 function ring(x,y,r){ ctx.strokeStyle='#d8b25e'; ctx.lineWidth=2; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.arc(x,y,r,0,TAU); ctx.stroke(); ctx.setLineDash([]); }
@@ -1065,7 +1310,7 @@ let paused=false;
 function frame(now){
   if(paused){ requestAnimationFrame(frame); return; }
   ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,side,side);
-  if(side){ if(mode==='dish') drawDish(now); else if(mode==='board') drawBoard(now); else if(isNeck()) drawNeckWear(); else render3D(); }
+  if(side){ if(mode==='dish') drawDish(now); else if(mode==='board') drawBoard(now); else render3D(); }
   requestAnimationFrame(frame);
 }
 
@@ -1185,7 +1430,9 @@ function setMode(m){
   mode=m; bDrag=null; down=null; stage.dataset.mode=m;
   document.querySelectorAll('.view').forEach(v=>v.setAttribute('aria-selected',v.dataset.mode===m));
   document.getElementById('shakeBtn').hidden=m!=='dish';
-  const w3=m==='wear'&&!isNeck();
+  const w3=m==='wear';
+  document.getElementById('mbBtn').hidden=!(w3&&isNeck());
+  if(w3&&W3.lastType!==TYPE){ W3.lastType=TYPE; viewReset(); view.yaw=view.yawT; }
   document.getElementById('centerBtn').hidden=!w3;
   document.getElementById('flipBtn').hidden=!w3;
   tonesEl.hidden=!w3; tonesEl.title='拖曳旋轉・雙指縮放・Shift 拖曳平移'; gl.hidden=!w3; if(!w3) w3msg.hidden=true;
