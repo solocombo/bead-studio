@@ -1,10 +1,11 @@
-/* 串珠盤 AR 試戴外掛（測試版：第 2 階段）
+/* 串珠盤 AR 試戴外掛（測試版：第 2.1 階段）
    只在 ar.html 載入；正式版 index.html 不會載入這個檔案。
    只透過 window.BeadStudio 介面和主程式溝通（見 src/bead-studio.html 最後面的 plugin interface）。
 
    1. 進入前先做「手機檢查」：環境檢查 + 載入偵測模型 + 模擬約 2.5 秒的實際運算量，給出建議
    2. 開相機、每格跑手部偵測，算出手腕的位置／方向／大小，把目前的設計戴上去
       第 2 階段：手腕遮擋後半圈、限制傾斜、依相機畫面調整亮度
+      第 2.1 階段：從畫面上的膚色找出前臂，用前臂的方向和實際粗細對齊手鍊
 
    設定（可寫在 web/config.js 的 window.BEAD_CONFIG）：arLib / arWasm / arModel */
 (() => {
@@ -112,7 +113,7 @@ BS.orderSource='ar-test';
 const st=document.createElement('style'); st.textContent=CSS; document.head.appendChild(st);
 document.body.insertAdjacentHTML('beforeend',MARKUP);
 BS.stage.insertAdjacentHTML('beforeend',BUTTON);
-BS.onModeChange(m=>{ $('arBtn').hidden=m!=='wear'; });
+BS.onModeChange(m=>{ $('arBtn').hidden=m!=='wear'||(BS.design().type==='necklace'); });   // 項鍊目前沒有 AR
 const CONFIG=CFG;
 
 const AR={ lib:null, lm:null, delegate:'', stream:null, facing:'environment', running:false, lastTs:0 };
@@ -378,7 +379,73 @@ const MAX_TILT=40*Math.PI/180;  // 手臂前後傾斜最多算到 40°
 // MediaPipe world z：預設數值越大離鏡頭越遠。若實測手鍊前後顛倒，網址加 #flipz 即可反轉來比對
 const Z_SIGN=/flipz/.test(location.hash)?-1:1;
 const PALM=[0,5,9,13,17];
-function wristPose(img,world,cam){
+/* ---------- 前臂偵測（膚色） ----------
+   MediaPipe 只看得到手，手腕一彎，從手掌推算的方向就會錯。這裡直接在畫面上找前臂：
+   1. 以手腕為中心截一塊小圖（96×96），從手掌取膚色當基準
+   2. 從手腕開始，往「不是手掌那一側」把顏色接近的相連像素找出來（不會跨過背景）
+   3. 對這塊區域做主成分分析：最長的方向＝前臂方向；垂直方向的寬度＝手腕在畫面上的粗細
+   可信度看兩件事：區域夠細長（像手臂），而且沒有漫到整片背景（背景顏色太像膚色時）。 */
+const FA={N:96,last:null,tick:0};
+FA.cv=document.createElement('canvas'); FA.cv.width=FA.cv.height=FA.N; FA.ctx=FA.cv.getContext('2d',{willReadFrequently:true});
+const ycc=(r,g,b)=>[.299*r+.587*g+.114*b, 128-.1687*r-.3313*g+.5*b, 128+.5*r-.4187*g-.0813*b];
+const median=a=>{ const x=[...a].sort((p,q)=>p-q); return x[Math.floor(x.length/2)]; };
+function detectForearm(hand,vw,vh){
+  const N=FA.N, P=i=>[hand[i].x*vw,hand[i].y*vh];
+  const w=P(0), m9=P(9), L=Math.hypot(m9[0]-w[0],m9[1]-w[1]); if(L<10) return null;
+  const R=2.2*L, sx=w[0]-R, sy=w[1]-R, cell=2*R/N;
+  FA.ctx.clearRect(0,0,N,N);
+  try{ FA.ctx.drawImage(arVideo,sx,sy,2*R,2*R,0,0,N,N); }catch{ return null; }
+  const d=FA.ctx.getImageData(0,0,N,N).data;
+  const G=(x,y)=>[Math.floor((x-sx)/cell),Math.floor((y-sy)/cell)];
+  // skin reference from the palm
+  const ref=[];
+  for(const j of [5,9,13,17]) for(const t of [.25,.5]){ const p=P(j), q=G(w[0]+(p[0]-w[0])*t,w[1]+(p[1]-w[1])*t);
+    if(q[0]<0||q[1]<0||q[0]>=N||q[1]>=N) continue; const o=(q[1]*N+q[0])*4; if(d[o+3]<200) continue; ref.push(ycc(d[o],d[o+1],d[o+2])); }
+  if(ref.length<4) return null;
+  const r0=[0,1,2].map(c=>median(ref.map(x=>x[c]))), mad=[1,2].map(c=>median(ref.map(x=>Math.abs(x[c]-r0[c]))));
+  const T=Math.max(8,3.2*Math.max(mad[0],mad[1]));
+  const hd=[(m9[0]-w[0])/L,(m9[1]-w[1])/L];
+  const ok=new Uint8Array(N*N);
+  for(let y=0;y<N;y++) for(let x=0;x<N;x++){
+    const o=(y*N+x)*4; if(d[o+3]<200) continue;
+    const px=sx+(x+.5)*cell-w[0], py=sy+(y+.5)*cell-w[1];
+    if(px*hd[0]+py*hd[1]>.15*L) continue;                       // hand side: not forearm
+    if(px*px+py*py>R*R) continue;
+    const [Y,Cb,Cr]=ycc(d[o],d[o+1],d[o+2]);
+    if(Math.abs(Cb-r0[1])<T&&Math.abs(Cr-r0[2])<T&&Y>r0[0]*.4&&Y<r0[0]*1.9) ok[y*N+x]=1;
+  }
+  // flood fill from the wrist point
+  const seen=new Uint8Array(N*N), q=[]; const s0=G(w[0],w[1]);
+  for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){ const x=s0[0]+dx,y=s0[1]+dy; if(x>=0&&y>=0&&x<N&&y<N&&ok[y*N+x]&&!seen[y*N+x]){ seen[y*N+x]=1; q.push(y*N+x); } }
+  for(let h=0;h<q.length;h++){ const k=q[h], x=k%N, y=(k/N)|0;
+    for(const [ax,ay] of [[1,0],[-1,0],[0,1],[0,-1]]){ const X=x+ax,Y=y+ay; if(X<0||Y<0||X>=N||Y>=N) continue; const kk=Y*N+X; if(ok[kk]&&!seen[kk]){ seen[kk]=1; q.push(kk); } } }
+  // statistics of the forearm part (0.3L … 2L from the wrist)
+  let n=0,mx=0,my=0; const pts=[];
+  for(const k of q){ const px=sx+((k%N)+.5)*cell-w[0], py=sy+(((k/N)|0)+.5)*cell-w[1], r=Math.hypot(px,py);
+    if(r<.3*L||r>2*L) continue; pts.push([px,py]); n++; mx+=px; my+=py; }
+  if(n<20) return {conf:0};
+  mx/=n; my/=n; let sxx=0,syy=0,sxy=0;
+  for(const [x,y] of pts){ sxx+=(x-mx)**2; syy+=(y-my)**2; sxy+=(x-mx)*(y-my); }
+  sxx/=n; syy/=n; sxy/=n;
+  const tr=sxx+syy, det=sxx*syy-sxy*sxy, l1=tr/2+Math.sqrt(Math.max(0,tr*tr/4-det)), l2=Math.max(1e-6,tr-l1);
+  let e=Math.abs(sxy)>1e-9?[l1-syy,sxy]:(sxx>=syy?[1,0]:[0,1]); const el=Math.hypot(...e); e=[e[0]/el,e[1]/el];
+  if(e[0]*mx+e[1]*my<0) e=[-e[0],-e[1]];                         // point from the wrist toward the elbow
+  const nrm=[-e[1],e[0]];
+  // width: perpendicular extent in slices 0.3L … 0.9L along the forearm
+  const bins=new Map();
+  for(const [x,y] of pts){ const al=x*e[0]+y*e[1]; if(al<.3*L||al>.9*L) continue; const b=Math.floor(al/(2*cell)), pp=x*nrm[0]+y*nrm[1];
+    const v=bins.get(b)||[1e9,-1e9]; v[0]=Math.min(v[0],pp); v[1]=Math.max(v[1],pp); bins.set(b,v); }
+  const widths=[...bins.values()].map(v=>v[1]-v[0]).filter(x=>x>0);
+  const width=widths.length>=3?median(widths)+cell:0;
+  // confidence
+  const halfArea=Math.PI*((2*L)**2-(.3*L)**2)/2, fill=n*cell*cell/halfArea, elong=l1/l2;
+  const cFill=fill<.08?0:fill<.15?(fill-.08)/.07:fill<.65?1:fill<.85?(.85-fill)/.2:0;
+  const cEl=Math.max(0,Math.min(1,(elong-1.8)/1.7));
+  const cW=width>.45*L&&width<1.4*L?1:.2;
+  return {conf:cFill*cEl*cW, dir:e, width, L, w, fill, elong};
+}
+
+function wristPose(img,world,cam,fa){
   const P=PALM.map(i=>cam.toPx(img[i])), Wd=PALM.map(i=>W3(world[i]));
   const ratios=[];
   for(let i=0;i<5;i++) for(let j=i+1;j<5;j++){
@@ -386,20 +453,33 @@ function wristPose(img,world,cam){
     ratios.push(Math.hypot(P[i][0]-P[j][0],P[i][1]-P[j][1])/lw);
   }
   ratios.sort((x,y)=>y-x);
-  const k=ratios[1]||ratios[0];                         // px per meter at the hand's depth
-  const Z=cam.f/k;
-  const at=(px)=>[(px[0]-cam.ppx)*Z/cam.f,(px[1]-cam.ppy)*Z/cam.f,Z];
+  const kPalm=ratios[1]||ratios[0];                     // px per meter at the hand's depth
   // 3D vector from two landmarks: in-plane part from the image, depth part from the true length
   const vec3=(i,j)=>{
-    const pi=cam.toPx(img[i]), pj=cam.toPx(img[j]), dx=(pi[0]-pj[0])/k, dy=(pi[1]-pj[1])/k;
+    const pi=cam.toPx(img[i]), pj=cam.toPx(img[j]), dx=(pi[0]-pj[0])/kPalm, dy=(pi[1]-pj[1])/kPalm;
     const L=len(sub(W3(world[i]),W3(world[j]))), dz=Math.sqrt(Math.max(0,L*L-dx*dx-dy*dy));
     return [dx,dy,dz*Math.sign((world[i].z-world[j].z)*Z_SIGN||1)];
   };
-  let h=vec3(0,9); const hxy=Math.hypot(h[0],h[1]);
-  h=[h[0],h[1],Math.sign(h[2])*Math.min(Math.abs(h[2])*TILT,hxy*Math.tan(MAX_TILT))];
-  const a=norm(h);
+  const fw=fa&&fa.conf>0?fa.conf:0;                     // trust in the skin-based forearm (0…1)
+  let h=vec3(0,9); const hxy=Math.hypot(h[0],h[1])||1e-6;
+  // in-plane direction: hand → wrist, blended toward the detected forearm
+  let d2=[h[0]/hxy,h[1]/hxy];
+  if(fw){ d2=[d2[0]*(1-fw)+fa.dir[0]*fw, d2[1]*(1-fw)+fa.dir[1]*fw]; const l=Math.hypot(...d2)||1; d2=[d2[0]/l,d2[1]/l]; }
+  // tilt toward/away from the camera still comes from the hand; trust it less when the forearm was found
+  const tilt=Math.sign(h[2])*Math.min(Math.abs(h[2])/hxy*TILT*(1-.5*fw),Math.tan(MAX_TILT));
+  const a=norm([d2[0],d2[1],tilt]);
   let u=vec3(5,17); u=norm(add(u,a,-dot(u,a)));
   const v=cross(a,u);
+  // scale: blend palm-based scale with the measured wrist width
+  let k=kPalm;
+  if(fw&&fa.width){
+    const n=norm([-d2[1],d2[0],0]), A=AR.wristMM/5.243, B=A*.65;
+    const visMM=2*Math.hypot(A*dot(u,n),B*dot(v,n));
+    const kW=fa.width*cam.sc/(visMM/1000);
+    const w2=.7*fw; k=Math.exp(Math.log(kPalm)*(1-w2)+Math.log(kW)*w2);
+  }
+  const Z=cam.f/k;
+  const at=(px)=>[(px[0]-cam.ppx)*Z/cam.f,(px[1]-cam.ppy)*Z/cam.f,Z];
   const c=add(at(cam.toPx(img[0])),a,.010);            // 10 mm toward the elbow
   return {c,a,u,v};
 }
@@ -565,7 +645,7 @@ function stopAR(){
   if(AR.stream){ AR.stream.getTracks().forEach(t=>t.stop()); AR.stream=null; }
   arVideo.srcObject=null; $('arView').hidden=true; BS.setPaused(false); $('arBtn').focus();
 }
-AR.skel=false; AR.scale=1;
+AR.skel=false; AR.scale=1; AR.wristMM=160;
 function arLoop(now){
   if(!AR.running) return;
   const vw=arVideo.videoWidth, vh=arVideo.videoHeight;
@@ -577,25 +657,37 @@ function arLoop(now){
     const sc=Math.max(cw/vw,ch/vh), ox=(cw-vw*sc)/2, oy=(ch-vh*sc)/2;
     const toPx=l=>[ox+l.x*vw*sc, oy+l.y*vh*sc];
     // pinhole camera in CSS px: principal point = video centre, focal length from a typical phone FOV
-    const cam={toPx, ppx:ox+vw*sc/2, ppy:oy+vh*sc/2, f:Math.max(vw,vh)*sc/(2*Math.tan(HFOV/2))};
+    const cam={toPx, sc, ppx:ox+vw*sc/2, ppy:oy+vh*sc/2, f:Math.max(vw,vh)*sc/(2*Math.tan(HFOV/2))};
     arCtx.clearRect(0,0,arCv.width,arCv.height);
     const hand=res.landmarks&&res.landmarks[0], world=res.worldLandmarks&&res.worldLandmarks[0];
     $('arGuide').hidden=!!hand;
     if(hand&&world){
       AR.lastSeen=now;
-      if(G.layout){ sampleLight(now); AR.pose=smoothPose(wristPose(hand,world,cam),now); placeBracelet(AR.pose,cam,cw,ch,AR.scale,BS.design().wristMM); G.group.visible=G.occ.visible=true; }
+      // forearm detection every other frame; smooth its direction, width and confidence
+      if((FA.tick++&1)===0){ const r=detectForearm(hand,vw,vh);
+        if(r&&r.conf>0){ const prev=FA.last;
+          FA.last={conf:F('fc',r.conf,now,.8,0), dir:(()=>{ let x=F('fx',r.dir[0],now,1,.3), y=F('fy',r.dir[1],now,1,.3); const l=Math.hypot(x,y)||1; return [x/l,y/l]; })(),
+                   width:F('fwid',r.width,now,1,.02), raw:r};
+        } else { FA.last=FA.last?{...FA.last,conf:F('fc',0,now,.8,0)}:null; } }
+      AR.wristMM=BS.design().wristMM;
+      if(G.layout){ sampleLight(now); AR.pose=smoothPose(wristPose(hand,world,cam,FA.last&&FA.last.conf>.15?FA.last:null),now); placeBracelet(AR.pose,cam,cw,ch,AR.scale,AR.wristMM); G.group.visible=G.occ.visible=true; }
       if(AR.skel){
         arCtx.lineWidth=3*d; arCtx.strokeStyle='rgba(216,178,94,.9)'; arCtx.beginPath();
         for(const [a,b] of HAND_LINKS){ const p=toPx(hand[a]), q=toPx(hand[b]); arCtx.moveTo(p[0]*d,p[1]*d); arCtx.lineTo(q[0]*d,q[1]*d); }
         arCtx.stroke();
         hand.forEach((l,i)=>{ const [x,y]=toPx(l); arCtx.fillStyle=i===0?'#ff6b5a':'#fff'; arCtx.beginPath(); arCtx.arc(x*d,y*d,(i===0?7:4)*d,0,TAU); arCtx.fill(); });
+        if(FA.last&&FA.last.raw&&FA.last.raw.w){ const fr=FA.last, w0=toPx(hand[0]), Lc=fr.raw.L*sc;   // 偵測到的前臂方向（紫）與粗細
+          arCtx.strokeStyle=`rgba(230,90,230,${.3+.7*fr.conf})`; arCtx.lineWidth=3*d; arCtx.beginPath();
+          arCtx.moveTo(w0[0]*d,w0[1]*d); arCtx.lineTo((w0[0]+fr.dir[0]*1.6*Lc)*d,(w0[1]+fr.dir[1]*1.6*Lc)*d); arCtx.stroke();
+          const m=[w0[0]+fr.dir[0]*.6*Lc,w0[1]+fr.dir[1]*.6*Lc], nn=[-fr.dir[1],fr.dir[0]], hw=fr.width*sc/2;
+          arCtx.beginPath(); arCtx.moveTo((m[0]-nn[0]*hw)*d,(m[1]-nn[1]*hw)*d); arCtx.lineTo((m[0]+nn[0]*hw)*d,(m[1]+nn[1]*hw)*d); arCtx.stroke(); }
         if(G.occHull){ arCtx.strokeStyle='rgba(120,200,255,.8)'; arCtx.lineWidth=1.5*d; arCtx.setLineDash([6*d,4*d]); arCtx.beginPath();   // 遮擋範圍（手腕輪廓）
           G.occHull.forEach((p,i)=>i?arCtx.lineTo(p[0]*d,p[1]*d):arCtx.moveTo(p[0]*d,p[1]*d)); arCtx.closePath(); arCtx.stroke(); arCtx.setLineDash([]); }
       }
-      $('arHudR').textContent='';
+      $('arHudR').textContent=AR.skel&&FA.last?`前臂 ${Math.round(FA.last.conf*100)}%`:'';
     } else {
       $('arHudR').textContent='尋找手部…';
-      if(now-AR.lastSeen>350){ G.group.visible=G.occ.visible=false; resetFilters(); }   // 短暫跟丟時先保留，避免閃爍
+      if(now-AR.lastSeen>350){ G.group.visible=G.occ.visible=false; resetFilters(); FA.last=null; }   // 短暫跟丟時先保留，避免閃爍
     }
     G.r.render(G.scene,G.cam);
     AR.fps.push(now); while(AR.fps.length&&now-AR.fps[0]>1000) AR.fps.shift();

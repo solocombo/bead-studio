@@ -16,8 +16,10 @@ const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SE
 });
 
 /* ---------- Notion 欄位名稱 → 網頁欄位（要跟 notion/schema.md 一致） ---------- */
-const CAT: Record<string, string> = { "主珠": "bead", "隔片": "spacer", "隔珠": "ball" };
+const CAT: Record<string, string> = { "主珠": "bead", "隔片": "spacer", "隔珠": "ball", "墜子": "pendant", "扣頭": "clasp", "鍊條": "chain" };
 const KIND: Record<string, string> = { "寶石": "gem", "珍珠": "pearl", "金屬": "metal", "隔片": "spacer" };
+const VARIANT: Record<string, string> = { "龍蝦扣": "lobster", "T字扣": "toggle", "磁扣": "magnet", "水滴": "drop", "月亮": "moon", "珍珠": "pearl" };
+const USE: Record<string, string> = { "手鍊": "bracelet", "項鍊": "necklace" };
 const COLOR: Record<string, string> = {
   "白透": "clear", "灰": "grey", "黑": "black", "綠": "green", "黃金": "yellow", "粉": "pink", "紫": "purple", "藍": "blue",
 };
@@ -152,7 +154,10 @@ Deno.serve(async (req) => {
         notion_page_id: page.id,
         name,
         cat,
-        kind: KIND[prop(page, "外觀") ?? ""] ?? null,
+        kind: ["pendant", "clasp", "chain"].includes(cat) ? cat : KIND[prop(page, "外觀") ?? ""] ?? null,
+        variant: VARIANT[prop(page, "樣式") ?? ""] ?? null,
+        use_for: (() => { const u = (prop(page, "適用") ?? []).map((x: string) => USE[x]).filter(Boolean);
+          return u.length ? u : ["pendant", "clasp", "chain"].includes(cat) ? ["necklace"] : ["bracelet", "necklace"]; })(),
         color: COLOR[prop(page, "色系") ?? ""] ?? null,
         d: prop(page, "直徑mm") ?? 8,
         w: prop(page, "佔寬mm") ?? null,

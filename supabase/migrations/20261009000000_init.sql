@@ -6,12 +6,14 @@ create table if not exists public.items (
   id              text primary key,          -- Notion「代碼」，例如 ame8
   notion_page_id  text unique,
   name            text not null,
-  cat             text not null check (cat in ('bead','spacer','ball')),
-  kind            text check (kind in ('gem','pearl','metal','spacer')),
+  cat             text not null check (cat in ('bead','spacer','ball','pendant','clasp','chain')),
+  kind            text check (kind in ('gem','pearl','metal','spacer','pendant','clasp','chain')),
+  variant         text,                      -- 沒照片時的畫法：lobster/toggle/magnet（扣頭）、drop/moon/pearl（墜子）
+  use_for         text[] not null default '{bracelet,necklace}',  -- 適用：手鍊／項鍊
   color           text,
   d               numeric not null,          -- 直徑；隔片為高度（mm）
   w               numeric,                   -- 串上佔寬（mm），隔片才需要
-  price           integer not null default 0,
+  price           integer not null default 0,  -- 鍊條為每公分單價
   images          text[] not null default '{}',
   info            jsonb not null default '{}'::jsonb,  -- origin, grade, months, tags, price, story, meaning
   sort            integer not null default 0,
@@ -27,6 +29,10 @@ create table if not exists public.orders (
   code          text not null,
   created_at    timestamptz not null default now(),
   status        text not null default 'new',   -- new / confirmed / made / shipped / cancelled
+  type          text not null default 'bracelet' check (type in ('bracelet','necklace')),
+  length_cm     numeric,                      -- 項鍊長度
+  clasp_id      text,
+  chain_id      text,
   wrist_mm      integer,
   fit           text,
   length_mm     numeric,

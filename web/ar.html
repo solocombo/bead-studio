@@ -116,6 +116,11 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outlin
   .price{font-size:28px}
 }
 @media (prefers-reduced-motion: reduce){ .card .add:active{transform:none} }
+.app>*{min-width:0}                      /* long rows (e.g. the category tabs) scroll inside instead of widening the page */
+.typebar{display:flex;gap:4px}
+.typebtn{border:1px solid var(--line);background:var(--surface);color:var(--muted);padding:5px 14px;border-radius:999px;font-family:var(--f-display);font-weight:500;font-size:13px;letter-spacing:.1em}
+.typebtn[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.neckname{font-size:11px;color:#d9cdb0;white-space:nowrap}
 .viewrow{display:flex;gap:6px;min-width:0}
 .viewrow .views{flex:1}
 .act.done{background:var(--fg);color:var(--bg);border-color:var(--fg)}
@@ -150,6 +155,10 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outlin
 
 <div class="app">
   <header class="head">
+    <div class="typebar" role="group" aria-label="作品類型">
+      <button class="typebtn" id="t-bracelet" data-type="bracelet" aria-pressed="true">手鍊</button>
+      <button class="typebtn" id="t-necklace" data-type="necklace" aria-pressed="false">項鍊</button>
+    </div>
     <div class="top">
       <div class="total">
         <span class="price" id="price">NT$0</span>
@@ -175,7 +184,14 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outlin
     <canvas id="cv"></canvas>
     <div class="w3msg" id="w3msg" hidden></div>
     <div class="tool tl">
-      <label class="wrist" for="wrist">手圍
+      <label class="wrist" for="neckLen" id="neckWrap" hidden>長度
+        <select id="neckLen">
+          <option value="40">40 cm</option><option value="42">42 cm</option><option value="45" selected>45 cm</option><option value="50">50 cm</option>
+          <option value="55">55 cm</option><option value="60">60 cm</option><option value="70">70 cm</option><option value="80">80 cm</option>
+        </select>
+        <span class="sep"></span><span class="neckname" id="neckName">公主長度</span>
+      </label>
+      <label class="wrist" for="wrist" id="wristWrap">手圍
         <select id="wrist">
           <option value="13">13 cm</option><option value="14">14 cm</option><option value="15">15 cm</option>
           <option value="16" selected>16 cm</option><option value="17">17 cm</option><option value="18">18 cm</option><option value="19">19 cm</option>
@@ -299,6 +315,16 @@ const ITEMS = [
   {id:'ballG3',name:'金色小圓珠',cat:'ball', kind:'metal', d:3, price:8,  color:'yellow', tone:GOLD},
   {id:'ballS3',name:'銀色小圓珠',cat:'ball', kind:'metal', d:3, price:8,  color:'grey',   tone:SILV},
   {id:'ballG4',name:'金色圓珠',  cat:'ball', kind:'metal', d:4, price:12, color:'yellow', tone:GOLD},
+  // 項鍊零件（價格與尺寸為範例，請在 Notion 改成實際數字）。w = 串上佔的長度；鍊條 price 為每公分
+  {id:'clLobG', name:'龍蝦扣（金）',cat:'clasp', kind:'clasp', variant:'lobster', d:7,  w:14, price:35, color:'yellow', tone:GOLD},
+  {id:'clLobS', name:'龍蝦扣（銀）',cat:'clasp', kind:'clasp', variant:'lobster', d:7,  w:14, price:35, color:'grey',   tone:SILV},
+  {id:'clTogG', name:'T字扣（金）', cat:'clasp', kind:'clasp', variant:'toggle',  d:12, w:22, price:55, color:'yellow', tone:GOLD},
+  {id:'clMagS', name:'磁扣（銀）',  cat:'clasp', kind:'clasp', variant:'magnet',  d:6,  w:12, price:45, color:'grey',   tone:SILV},
+  {id:'chG',    name:'金色細鍊',    cat:'chain', kind:'chain', d:2.5, w:10, price:4, color:'yellow', tone:GOLD},
+  {id:'chS',    name:'銀色細鍊',    cat:'chain', kind:'chain', d:2.5, w:10, price:3, color:'grey',   tone:SILV},
+  {id:'pdDrop', name:'白水晶水滴墜',cat:'pendant', kind:'pendant', variant:'drop',  d:24, w:4, price:180, color:'clear', p:{base:[226,233,233],clear:.92,glow:[255,255,255]}},
+  {id:'pdMoon', name:'金色月亮墜',  cat:'pendant', kind:'pendant', variant:'moon',  d:18, w:4, price:120, color:'yellow', tone:GOLD},
+  {id:'pdPearl',name:'珍珠墜',      cat:'pendant', kind:'pendant', variant:'pearl', d:15, w:4, price:90,  color:'clear', tone:GOLD},
 ];
 /* Product write-ups (sample copy — replace with your own). Markdown: paragraphs, - lists, **bold**, ### headings. */
 const INFO = {
@@ -350,6 +376,15 @@ const INFO = {
     price:'- 依圓度、光澤、瑕疵分級\n- 越圓、光澤越強越貴',
     story:'淡水珍珠由河蚌在淡水中培育，形狀多半不是正圓，每顆都有自己的樣子。',
     meaning:'六月的生日石，寓意純潔與溫柔。'},
+  clasp:{origin:'—',grade:'範例資料（請填實際材質，如 925 銀、14K 包金、合金電鍍）',months:[],tags:['項鍊零件'],
+    price:'- 每條項鍊一個扣頭\n- **價格與長度為範例**，請依實際進貨改寫',
+    story:'扣頭在項鍊後方，長度會算進總長。龍蝦扣最常見也最牢；T 字扣可以戴在前面當裝飾；磁扣單手就能戴，但較重的珠鍊比較容易鬆脫。',meaning:''},
+  chain:{origin:'—',grade:'範例資料（請填實際材質）',months:[],tags:['項鍊零件'],
+    price:'- 依長度計價（每公分）\n- 選了鍊條，珠子以外的長度會自動用鍊條補滿\n- **單價為範例**',
+    story:'前段用珠子、後段接細鍊，重量輕、戴起來不壓脖子，也能用較少的珠子做出長項鍊。',meaning:''},
+  pendant:{origin:'—',grade:'範例資料',months:[],tags:['墜子'],
+    price:'- 單個計價\n- **價格為範例**',
+    story:'墜子掛在項鍊上，會讓項鍊在胸前形成 V 字。排在串珠順序的哪個位置，就掛在哪裡，通常放在正中間。',meaning:''},
   metal:{origin:'—',grade:'電鍍（請填實際材質，如 925 銀、14K 包金）',months:[],tags:['配件'],
     price:'- 單顆計價\n- 實際價格依材質而定（合金、925 銀、包金差異很大）',
     story:'隔片與隔珠用來分隔主珠，讓整串更有節奏感，也能保護珠子之間不互相磨損。',
@@ -357,11 +392,13 @@ const INFO = {
 };
 const FAMILY = id => id.startsWith('rut')?'rut':id.startsWith('peri')?'peri':id.startsWith('clr')?'clr':id.startsWith('gmoon')?'gmoon':id.startsWith('moon')?'moon':
   id.startsWith('rose')?'rose':id.startsWith('straw')?'straw':id.startsWith('ame')?'ame':id.startsWith('aqua')?'aqua':id.startsWith('cit')?'cit':id.startsWith('obs')?'obs':id.startsWith('pearl')?'pearl':'metal';
-const CAT = {}; ITEMS.forEach(it => { it.w = it.w || it.d; it.images = it.images || []; it.info = it.info || INFO[FAMILY(it.id)]; CAT[it.id] = it; });
+const PART_CATS = new Set(['clasp','chain','pendant']);    // necklace only
+const CAT = {}; ITEMS.forEach(it => { it.w = it.w || it.d; it.images = it.images || []; it.info = it.info || INFO[PART_CATS.has(it.cat)?it.cat:FAMILY(it.id)]; CAT[it.id] = it; });
 // a bead entry in a design: {uid, id, v}; v picks which of the item's photos this bead shows
 let uidN = 1;
 const mk = id => ({ uid: uidN++, id, v: Math.floor(Math.random()*CONFIG.variants) });
-const sizeLabel = it => it.kind === 'spacer' ? `佔${it.w}mm` : `${it.d}mm`;
+const sizeLabel = it => it.kind === 'spacer' ? `佔${it.w}mm` : it.kind==='clasp' ? `長${it.w}mm` : it.kind==='chain' ? '依長度計價' : it.kind==='pendant' ? `高${it.d}mm` : `${it.d}mm`;
+const priceLabel = it => it.kind==='chain' ? `NT$${it.price}/cm` : `NT$${it.price}`;
 
 /* ---------- bead drawing ---------- */
 const rgba = (c,a) => `rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
@@ -447,7 +484,51 @@ function drawSpacer(c,w,h,t,variant){
   }
   c.restore();
 }
+/* necklace parts. Clasp and chain lie along x (the string); pendants hang along +y with the bail at the top. */
+function metalGrad(c,x0,y0,x1,y1,t){ const g=c.createLinearGradient(x0,y0,x1,y1); g.addColorStop(0,t[0]); g.addColorStop(.35,t[2]); g.addColorStop(.6,t[3]); g.addColorStop(1,t[4]); return g; }
+function drawClasp(c,w,h,t,variant){
+  c.lineCap='round'; c.lineJoin='round';
+  if(variant==='toggle'){
+    const R=h*.42; c.strokeStyle=metalGrad(c,-w/2,-R,-w/2+2*R,R,t); c.lineWidth=h*.16;
+    c.beginPath(); c.arc(-w/2+R+h*.08,0,R,0,TAU); c.stroke();
+    c.fillStyle=metalGrad(c,0,-h*.1,0,h*.1,t); rrect(c,-w*.02,-h*.09,w*.5,h*.18,h*.09); c.fill();
+    c.lineWidth=h*.1; c.beginPath(); c.moveTo(-w/2+2*R,0); c.lineTo(-w*.02,0); c.stroke();
+  } else if(variant==='magnet'){
+    c.fillStyle=metalGrad(c,0,-h/2,0,h/2,t);
+    rrect(c,-w/2,-h/2,w*.47,h,h*.3); c.fill(); rrect(c,w*.03,-h/2,w*.47,h,h*.3); c.fill();
+    c.strokeStyle='rgba(0,0,0,.35)'; c.lineWidth=Math.max(.6,h*.06); c.beginPath(); c.moveTo(0,-h/2); c.lineTo(0,h/2); c.stroke();
+  } else { // lobster
+    c.fillStyle=metalGrad(c,-w/2,-h/2,w/2,h/2,t);
+    c.beginPath(); c.moveTo(-w*.1,-h*.45); c.quadraticCurveTo(w*.48,-h*.5,w*.48,0); c.quadraticCurveTo(w*.48,h*.5,-w*.1,h*.45);
+    c.quadraticCurveTo(-w*.22,0,-w*.1,-h*.45); c.fill();
+    c.strokeStyle='rgba(0,0,0,.4)'; c.lineWidth=Math.max(.5,h*.06); c.beginPath(); c.moveTo(w*.05,-h*.15); c.quadraticCurveTo(w*.3,-h*.22,w*.36,0); c.stroke();
+    c.strokeStyle=metalGrad(c,-w/2,0,-w*.1,0,t); c.lineWidth=h*.13; c.beginPath(); c.arc(-w*.34,0,h*.24,0,TAU); c.stroke();
+  }
+}
+function drawChain(c,w,h,t){
+  const L=h*1.6; c.lineWidth=Math.max(.6,h*.28); c.strokeStyle=metalGrad(c,0,-h/2,0,h/2,t);
+  for(let x=-w/2+L/2,i=0;x<w/2;x+=L*.72,i++){ c.beginPath(); if(i%2) c.ellipse(x,0,L/2,h*.28,0,0,TAU); else c.ellipse(x,0,L/2,h*.45,0,0,TAU); c.stroke(); }
+}
+function drawPendant(c,it,S){
+  const h=it.d*S, t=it.tone||GOLD, bail=Math.max(3*S,h*.14);
+  c.strokeStyle=metalGrad(c,-bail,-h/2,bail,-h/2,t); c.lineWidth=Math.max(1,S*.7);
+  c.beginPath(); c.ellipse(0,-h/2+bail*.55,bail*.45,bail*.55,0,0,TAU); c.stroke();
+  const top=-h/2+bail*1.05, body=h/2-top;
+  c.save(); c.translate(0,top+body/2);
+  if(it.variant==='drop'){
+    const r=body*.32; c.beginPath(); c.moveTo(0,-body/2); c.bezierCurveTo(r*1.2,-body*.1,r*1.3,body*.25,0,body/2); c.bezierCurveTo(-r*1.3,body*.25,-r*1.2,-body*.1,0,-body/2); c.closePath();
+    c.save(); c.clip(); drawGem(c,body*.55,it.p,rng(it.id)); c.restore();
+    c.strokeStyle='rgba(255,255,255,.5)'; c.lineWidth=Math.max(.5,S*.25); c.beginPath(); c.moveTo(0,-body/2); c.lineTo(0,body/2); c.moveTo(-r*.9,0); c.lineTo(r*.9,0); c.stroke();
+  } else if(it.variant==='moon'){
+    const R=body/2; c.fillStyle=metalGrad(c,-R,-R,R,R,t);
+    c.beginPath(); c.arc(0,0,R,0,TAU); c.arc(R*.45,-R*.15,R*.82,0,TAU,true); c.fill('evenodd');
+  } else { drawPearl(c,body/2); }
+  c.restore();
+}
 function drawItem(c,it,S){
+  if(it.kind==='clasp') return drawClasp(c,it.w*S,it.d*S,it.tone||GOLD,it.variant);
+  if(it.kind==='chain') return drawChain(c,it.w*S,it.d*S,it.tone||GOLD);
+  if(it.kind==='pendant') return drawPendant(c,it,S);
   if(it.kind==='spacer') drawSpacer(c,it.w*S,it.d*S,it.tone,it.variant);
   else if(it.kind==='metal') drawMetal(c,it.d/2*S,it.tone);
   else if(it.kind==='pearl') drawPearl(c,it.d/2*S);
@@ -494,13 +575,25 @@ const bodies=new Map();      // uid -> physics body (散盤)
 const boardPos=new Map();    // uid -> current mm along the ruler (串珠盤, animated)
 
 const wristMM=()=>+document.getElementById('wrist').value*10;
+/* 作品類型：手鍊／項鍊各自保留一份設計，切換不會弄丟 */
+let TYPE='bracelet';
+const isNeck=()=>TYPE==='necklace';
+const NK={clasp:'clLobG', chain:null};                       // 項鍊：扣頭、鍊條（null = 不用鍊條）
+const store={bracelet:null, necklace:{seq:[],history:[]}};
+const neckCM=()=>+document.getElementById('neckLen').value;
+const NECK_NAMES=[[41,'頸鍊 Choker'],[48,'公主長度 Princess'],[60,'馬汀尼長度 Matinee'],[86,'歌劇長度 Opera'],[999,'長鍊 Rope']];
+const neckName=cm=>NECK_NAMES.find(([m])=>cm<=m)[1];
+const beadsW=()=>seq.reduce((a,s)=>a+CAT[s.id].w,0);
+const claspW=()=>NK.clasp&&CAT[NK.clasp]?CAT[NK.clasp].w:0;
+const chainMM=()=>isNeck()&&NK.chain&&CAT[NK.chain]?Math.max(0,neckCM()*10-beadsW()-claspW()):0;
+const chainPrice=()=>NK.chain&&chainMM()>0?Math.ceil(chainMM()/10)*CAT[NK.chain].price:0;
 // 鬆份 (ease) grows with bead size: a bracelet's centre line sits half a bead out from the skin.
 // Common guide: 6mm +10, 8mm +15, 10mm +20, 12mm +25 mm  →  2.5 × d − 5
 const fitAdj=()=>+document.getElementById('fit').value;
 function mainBeadD(list){ const r=(list||seq.map(s=>CAT[s.id])).filter(i=>i.kind==='gem'||i.kind==='pearl'); return r.length?r.reduce((a,i)=>a+i.d,0)/r.length:8; }
 const easeFor=d=>Math.max(5,Math.round((2.5*d-5+fitAdj())*2)/2);
-const targetLen=()=>wristMM()+easeFor(mainBeadD());
-const totalW=()=>seq.reduce((a,s)=>a+CAT[s.id].w,0);
+const targetLen=()=>isNeck()?neckCM()*10:wristMM()+easeFor(mainBeadD());
+const totalW=()=>isNeck()?beadsW()+claspW()+chainMM():beadsW();
 
 /* ---------- 散盤: physics dish ---------- */
 function buildWalls(){
@@ -539,6 +632,7 @@ function layoutStage(){
 }
 function makeBody(it,x,y){
   const opt={frictionAir:.085,friction:.04,restitution:.25,density:.002};
+  if(it.kind==='pendant') return Bodies.rectangle(x,y,it.d*.62*S,it.d*S,Object.assign({chamfer:{radius:it.d*.25*S}},opt));
   return it.kind==='spacer'
     ? Bodies.rectangle(x,y,it.w*S,it.d*S,Object.assign({chamfer:{radius:it.w*S*.45}},opt))
     : Bodies.circle(x,y,it.d/2*S,opt);
@@ -559,14 +653,21 @@ const runner=Runner.create(); Runner.run(runner,engine);
 function shake(){ bodies.forEach(b=>Body.setVelocity(b,{x:(Math.random()-.5)*14,y:(Math.random()-.5)*14})); }
 
 /* ---------- sequence edits ---------- */
-function pushHistory(){ history.push(seq.map(s=>({...s}))); if(history.length>80) history.shift(); }
+function pushHistory(){ history.push({seq:seq.map(s=>({...s})),clasp:NK.clasp,chain:NK.chain}); if(history.length>80) history.shift(); }
 function restore(snap){
+  if(!Array.isArray(snap)){ if(isNeck()){ NK.clasp=snap.clasp; NK.chain=snap.chain; } snap=snap.seq; }
   const keep=new Set(snap.map(s=>s.uid));
   bodies.forEach((b,uid)=>{ if(!keep.has(uid)){ Composite.remove(engine.world,b); bodies.delete(uid); boardPos.delete(uid);} });
   snap.forEach(s=>{ if(!bodies.has(s.uid)) spawn(s.uid,s.id,s.v); });
   seq=snap; select(null); refresh();
 }
-function addItem(id){ pushHistory(); const e=mk(id); seq.push(e); spawn(e.uid,e.id,e.v); refresh(); }
+function addItem(id){
+  const it=CAT[id]; if(!it) return;
+  if(PART_CATS.has(it.cat)&&!isNeck()) return;
+  if(it.cat==='clasp'){ pushHistory(); NK.clasp=NK.clasp===id?null:id; boardCache=null; refresh(); return; }
+  if(it.cat==='chain'){ pushHistory(); NK.chain=NK.chain===id?null:id; refresh(); return; }
+  pushHistory(); const e=mk(id); seq.push(e); spawn(e.uid,e.id,e.v); refresh();
+}
 function removeUid(uid){ pushHistory(); restore(seq.filter(s=>s.uid!==uid).map(s=>({...s}))); }
 
 /* ---------- 串珠盤: round board with a measured groove ---------- */
@@ -630,6 +731,7 @@ function insertIndex(g,p){
   return i;
 }
 function drawBoard(now){
+  if(isNeck()) return drawNeckBoard(now);
   const g=boardGeom(); ctx.drawImage(buildBoard(g),0,0,side,side);
   const tgt=boardLayout(g), k=(reduceMotion||SNAP)?1:.2;
   if(g.W>0){ ctx.strokeStyle='rgba(150,120,70,.8)'; ctx.lineWidth=1.4; ctx.beginPath(); ctx.arc(cx,cy,g.R,0,TAU); ctx.stroke(); }
@@ -654,11 +756,126 @@ function drawBoard(now){
   ctx.textBaseline='alphabetic';
 }
 function hitBoard(p){
+  if(isNeck()) return hitNeck(p);
   const g=boardGeom(); let best=null, bd=Infinity;
   for(const s of seq){ const it=CAT[s.id], mm=boardPos.get(s.uid); if(mm==null) continue;
     const th=mmToAng(g,mm), x=cx+Math.cos(th)*g.R, y=cy+Math.sin(th)*g.R, d=Math.hypot(p.x-x,p.y-y);
     if(d<Math.max(Math.max(it.d,it.w)/2*g.Sb,14)&&d<bd){ bd=d; best=s; } }
   return best;
+}
+
+/* ---------- 項鍊盤：U 形，刻度從正中央往兩側量 ----------
+   路徑參數 s（mm）：0＝左上端（扣頭），往下繞過底部（s＝L/2 是正中央、胸前），到右上端 L。
+   珠子以正中央為中心排；選了鍊條就把兩側補滿；沒選鍊條而珠子不夠長時，兩側露出串線。 */
+const NV={z:1,x:0,y:0};                                     // board zoom / pan
+function neckGeom(){
+  const T=targetLen(), Wb=beadsW(), c=claspW(), L=Math.max(T,Wb+c);
+  const r=L*.155, h=(L-Math.PI*r)/2;
+  const top=64, bottom=92, padX=26;                          // keep clear of the corner controls
+  const Sb=Math.min((side-2*padX)/(2*r+22),(side-top-bottom)/(h+r+16));
+  const ox=cx, oy=top+(side-top-bottom-(h+r)*Sb)/2+h*Sb;
+  return {T,Wb,c,L,r,h,Sb,ox,oy,ch:11*Sb};
+}
+function neckAt(g,s){                                         // → {x,y,a} in board px (before zoom)
+  s=Math.max(0,Math.min(g.L,s)); let x,y,a;
+  if(s<g.h){ x=-g.r; y=-g.h+s; a=Math.PI/2; }
+  else if(s<g.h+Math.PI*g.r){ const t=(s-g.h)/g.r; x=-g.r*Math.cos(t); y=g.r*Math.sin(t); a=Math.PI/2-t; }
+  else { x=g.r; y=-(s-g.h-Math.PI*g.r); a=-Math.PI/2; }
+  return {x:g.ox+x*g.Sb, y:g.oy+y*g.Sb, a};
+}
+function neckS(g,p){                                          // nearest s for a board-px point
+  let best=0,bd=Infinity; for(let s=0;s<=g.L;s+=1){ const q=neckAt(g,s), d=(q.x-p.x)**2+(q.y-p.y)**2; if(d<bd){ bd=d; best=s; } } return best;
+}
+const toBoard=p=>({x:(p.x-NV.x)/NV.z, y:(p.y-NV.y)/NV.z});
+function clampNV(){ NV.z=Math.max(1,Math.min(5,NV.z)); const m=side*(NV.z-1); NV.x=Math.max(-m,Math.min(0,NV.x)); NV.y=Math.max(-m,Math.min(0,NV.y)); if(NV.z===1){ NV.x=NV.y=0; } }
+function buildNeckBoard(g){
+  const key=['n',side,g.L,g.T].join('|'); if(boardCache&&boardCache.key===key) return boardCache.cv;
+  const c2=document.createElement('canvas'); c2.width=c2.height=side*dpr; const c=c2.getContext('2d'); c.scale(dpr,dpr);
+  // board body: U-shaped felt board
+  const pad=g.ch*1.6+18, path=new Path2D(), N=180;
+  for(let i=0;i<=N;i++){ const q=neckAt(g,i/N*g.L); i?path.lineTo(q.x,q.y):path.moveTo(q.x,q.y); }
+  c.save(); c.lineCap='round'; c.lineJoin='round';
+  c.strokeStyle='rgba(0,0,0,.45)'; c.lineWidth=pad*2+10; c.translate(4,7); c.stroke(path); c.translate(-4,-7);
+  c.strokeStyle='rgba(160,128,62,.75)'; c.lineWidth=pad*2; c.stroke(path);
+  c.strokeStyle='#e4e7e0'; c.lineWidth=pad*2-3; c.stroke(path); c.restore();
+  c.save(); c.lineCap='round'; c.strokeStyle='#cfd4ca'; c.lineWidth=g.ch*1.15; c.stroke(path);
+  c.strokeStyle='#bcc2b7'; c.lineWidth=g.ch*.5; c.stroke(path); c.restore();
+  // ticks from the centre: 1 cm small, 5 cm labelled
+  const u=side/380; c.font=`500 ${Math.max(9,10*u)}px "IBM Plex Mono",monospace`; c.textAlign='center'; c.textBaseline='middle';
+  for(let cm=0;cm*10<=g.L/2;cm++) for(const sg of cm?[-1,1]:[1]){
+    const s=g.L/2+sg*cm*10, q=neckAt(g,s), on=outward(g,s);   // tick on the outer side of the U
+    const off=g.ch*.75, big=cm%5===0, L2=(big?7:3.5)*u;
+    c.strokeStyle=big?'rgba(70,60,40,.75)':'rgba(90,80,60,.45)'; c.lineWidth=big?1.1:.7;
+    c.beginPath(); c.moveTo(q.x+on[0]*off,q.y+on[1]*off); c.lineTo(q.x+on[0]*(off+L2),q.y+on[1]*(off+L2)); c.stroke();
+    if(big&&cm>0&&cm*10<g.L/2-8){ c.fillStyle='rgba(70,60,40,.85)'; c.fillText(cm,q.x+on[0]*(off+L2+7*u),q.y+on[1]*(off+L2+7*u)); }
+  }
+  c.fillStyle='rgba(70,60,40,.7)'; const q0=neckAt(g,g.L/2), o0=outward(g,g.L/2); c.fillText('0',q0.x+o0[0]*(g.ch*.75+14*u),q0.y+o0[1]*(g.ch*.75+14*u));
+  // target ends
+  for(const sg of [-1,1]){ const s=g.L/2+sg*g.T/2, q=neckAt(g,s), on=outward(g,s);
+    c.strokeStyle='#b0452f'; c.lineWidth=1.6; c.beginPath(); c.moveTo(q.x-on[0]*g.ch*.7,q.y-on[1]*g.ch*.7); c.lineTo(q.x+on[0]*g.ch*1.6,q.y+on[1]*g.ch*1.6); c.stroke(); }
+  c.fillStyle='rgba(70,60,40,.7)'; c.font=`500 ${Math.max(9,9*u)}px "Noto Sans TC",sans-serif`;
+  c.fillText('cm・從正中央量',g.ox,g.oy+g.r*g.Sb*.35);
+  boardCache={key,cv:c2}; return c2;
+}
+function outward(g,s){ if(s<g.h) return [-1,0]; if(s>g.h+Math.PI*g.r) return [1,0]; const t=(s-g.h)/g.r; return [-Math.cos(t),Math.sin(t)]; }
+function neckLayout(g){
+  const out=new Map(); let cum=g.L/2-g.Wb/2, idx=0, gapDone=!bDrag||!bDrag.moved;
+  seq.forEach(s=>{ if(bDrag&&bDrag.moved&&s.uid===bDrag.uid) return; const w=CAT[s.id].w;
+    if(!gapDone&&bDrag.insert===idx){ cum+=bDrag.w; gapDone=true; }
+    out.set(s.uid,cum+w/2); cum+=w; idx++; });
+  return out;
+}
+function neckInsert(g,p){
+  const mm=neckS(g,p); let cum=g.L/2-g.Wb/2, i=0;
+  for(const s of seq){ if(s.uid===bDrag.uid) continue; const w=CAT[s.id].w; if(cum+w/2>mm) return i; cum+=w; i++; }
+  return i;
+}
+function drawNeckBoard(now){
+  const g=neckGeom();
+  ctx.save(); if(!SNAP){ ctx.translate(NV.x,NV.y); ctx.scale(NV.z,NV.z); }
+  ctx.drawImage(buildNeckBoard(g),0,0,side,side);
+  const tgt=neckLayout(g), k=(reduceMotion||SNAP)?1:.2, a0=g.L/2-g.Wb/2, a1=g.L/2+g.Wb/2, c=g.c;
+  // cord under the beads / bare cord at both sides (no chain)
+  ctx.strokeStyle='rgba(150,120,70,.85)'; ctx.lineWidth=1.3;
+  ctx.beginPath(); for(let s=c/2,first=true;s<=g.L-c/2;s+=2){ const q=neckAt(g,s); first?ctx.moveTo(q.x,q.y):ctx.lineTo(q.x,q.y); first=false; } ctx.stroke();
+  // chain on both sides
+  if(NK.chain&&CAT[NK.chain]){ const ch=CAT[NK.chain], L=ch.d*1.6, step=L*.72;
+    for(const [s0,s1] of [[c/2,a0],[a1,g.L-c/2]]){ let i=0; for(let s=s0+step/2;s<s1;s+=step,i++){ const q=neckAt(g,s);
+      ctx.save(); ctx.translate(q.x,q.y); ctx.rotate(q.a); ctx.strokeStyle=metalGrad(ctx,0,-2,0,2,ch.tone); ctx.lineWidth=Math.max(.8,ch.d*.28*g.Sb);
+      ctx.beginPath(); ctx.ellipse(0,0,L/2*g.Sb,ch.d*(i%2?.28:.45)*g.Sb,0,0,TAU); ctx.stroke(); ctx.restore(); } } }
+  // clasp at the left end, jump ring at the right end
+  if(NK.clasp&&CAT[NK.clasp]){ const it=CAT[NK.clasp], q=neckAt(g,c/2), r=neckAt(g,g.L-1.5);
+    blit(ctx,it,g.Sb,q.x,q.y,q.a+Math.PI,1);
+    ctx.strokeStyle=metalGrad(ctx,r.x-3,r.y,r.x+3,r.y,it.tone); ctx.lineWidth=Math.max(1,g.Sb*.8); ctx.beginPath(); ctx.arc(r.x,r.y,2*g.Sb,0,TAU); ctx.stroke(); }
+  const pts=[];
+  for(const s of seq){
+    if(bDrag&&bDrag.moved&&s.uid===bDrag.uid) continue;
+    const t=tgt.get(s.uid); let cur=boardPos.get(s.uid); if(cur==null) cur=t;
+    cur+=(t-cur)*k; boardPos.set(s.uid,cur);
+    const it=CAT[s.id], q=neckAt(g,cur);
+    if(it.kind==='pendant'){ const hang=it.d/2*g.Sb; pts.push({s,it,x:q.x,y:q.y+hang,a:0}); }
+    else pts.push({s,it,x:q.x,y:q.y,a:q.a+Math.PI/2});
+  }
+  for(const q of pts) shadow(ctx,q.it,g.Sb,q.x,q.y,q.a,1,.3);
+  for(const q of pts){ blit(ctx,q.it,g.Sb,q.x,q.y,q.a,1,q.s.v); if(q.s.uid===selected&&!SNAP) ring(q.x,q.y,Math.max(q.it.d,q.it.w)/2*g.Sb+4); }
+  if(bDrag&&bDrag.moved){ const it=CAT[bDrag.id], bp=toBoard(bDrag.p);
+    shadow(ctx,it,g.Sb,bp.x,bp.y,0,4,.35); blit(ctx,it,g.Sb*1.4,bp.x,bp.y-8,0,1,bDrag.v); }
+  ctx.restore();
+  if(!seq.length) emptyText('點下方素材，排進項鍊盤',g.oy-g.h*g.Sb*.55);
+  if(NV.z>1&&!SNAP){ ctx.fillStyle='rgba(239,227,196,.85)'; ctx.font='500 11px "Noto Sans TC",sans-serif'; ctx.textAlign='center'; ctx.fillText(`放大 ${NV.z.toFixed(1)}×・點兩下還原`,cx,62); }
+}
+function hitNeck(p){
+  const g=neckGeom(), bp=toBoard(p); let best=null, bd=Infinity;
+  for(const s of seq){ const it=CAT[s.id], mm=boardPos.get(s.uid); if(mm==null) continue;
+    const q=neckAt(g,mm), y=it.kind==='pendant'?q.y+it.d/2*g.Sb:q.y, d=Math.hypot(bp.x-q.x,bp.y-y);
+    if(d<Math.max(Math.max(it.d,it.w)/2*g.Sb,14/NV.z)&&d<bd){ bd=d; best=s; } }
+  return best;
+}
+function drawNeckWear(){
+  ctx.fillStyle='rgba(239,227,196,.9)'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.font=`600 ${Math.max(15,side*.045)}px "Noto Serif TC",serif`; ctx.fillText('項鍊試戴人模製作中',cx,cy-16);
+  ctx.font=`400 ${Math.max(12,side*.033)}px "Noto Sans TC",sans-serif`; ctx.fillStyle='rgba(239,227,196,.7)';
+  ctx.fillText('下一階段：男女半身、髮型、襯衫／圓領／V 領',cx,cy+16); ctx.textBaseline='alphabetic';
 }
 
 /* ---------- 戴上看: 3D hand you can turn over ---------- */
@@ -862,7 +1079,7 @@ let paused=false;
 function frame(now){
   if(paused){ requestAnimationFrame(frame); return; }
   ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,side,side);
-  if(side){ if(mode==='dish') drawDish(now); else if(mode==='board') drawBoard(now); else render3D(); }
+  if(side){ if(mode==='dish') drawDish(now); else if(mode==='board') drawBoard(now); else if(isNeck()) drawNeckWear(); else render3D(); }
   requestAnimationFrame(frame);
 }
 
@@ -881,6 +1098,11 @@ cv.addEventListener('pointerdown',e=>{
   if(mode==='wear'){ touches.set(e.pointerId,p);
     if(touches.size===2){ const [a,b]=[...touches.values()]; pinch={d:Math.hypot(a.x-b.x,a.y-b.y),dist:view.dist,mx:(a.x+b.x)/2,my:(a.y+b.y)/2}; }
     W3.panBtn=e.button===2||e.shiftKey; return; }
+  if(mode==='board'&&isNeck()){ touches.set(e.pointerId,p);
+    if(touches.size===2){ const [a,b]=[...touches.values()]; pinch={d:Math.hypot(a.x-b.x,a.y-b.y),z:NV.z,mx:(a.x+b.x)/2,my:(a.y+b.y)/2,nx:NV.x,ny:NV.y}; down=null; bDrag=null; return; }
+    const s=hitBoard(p); down={p,last:p,uid:s?s.uid:null,moved:false,pan:!s};
+    if(s) bDrag={uid:s.uid,id:s.id,v:s.v,w:CAT[s.id].w,p,moved:false,insert:0};
+    return; }
   if(mode==='dish'){ const b=hitDish(p); down={p,uid:b?b.plugin.uid:null,moved:false};
     if(b){ drag=Constraint.create({pointA:{...p},bodyB:b,pointB:{x:0,y:0},stiffness:.15,damping:.1,length:0}); Composite.add(engine.world,drag); } }
   else { const s=hitBoard(p); down={p,uid:s?s.uid:null,moved:false};
@@ -897,27 +1119,36 @@ cv.addEventListener('pointermove',e=>{
       if(W3.panBtn){ view.tx-=dx*mmPerPx; view.ty+=dy*mmPerPx; }
       else { view.yawT+=dx*.012; view.pitch+=dy*.006; } }
     viewClamp(); return; }
+  if(mode==='board'&&isNeck()&&touches.has(e.pointerId)){ touches.set(e.pointerId,p);
+    if(touches.size>=2&&pinch){ const [a,b]=[...touches.values()], mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
+      const z=pinch.z*Math.hypot(a.x-b.x,a.y-b.y)/Math.max(1,pinch.d);
+      // keep the board point under the pinch centre fixed
+      const bx=(pinch.mx-pinch.nx)/pinch.z, by=(pinch.my-pinch.ny)/pinch.z;
+      NV.z=z; NV.x=mx-bx*NV.z; NV.y=my-by*NV.z; clampNV(); return; } }
   if(!down) return;
   if(Math.hypot(p.x-down.p.x,p.y-down.p.y)>6) down.moved=true;
   if(drag) drag.pointA=p;
-  if(bDrag&&down.moved){ bDrag.moved=true; bDrag.p=p; bDrag.insert=insertIndex(boardGeom(),p); }
+  if(down.pan&&down.moved){ NV.x+=p.x-down.last.x; NV.y+=p.y-down.last.y; clampNV(); down.last=p; return; }
+  if(bDrag&&down.moved){ bDrag.moved=true; bDrag.p=p; bDrag.insert=isNeck()?neckInsert(neckGeom(),toBoard(p)):insertIndex(boardGeom(),p); }
 });
 function endPointer(e){
-  if(touches.has(e.pointerId)){ touches.delete(e.pointerId); if(touches.size<2) pinch=null; return; }
+  if(touches.has(e.pointerId)){ touches.delete(e.pointerId); if(touches.size<2) pinch=null; if(mode==='wear'||!down) return; }
   if(!down) return;
   if(drag){ Composite.remove(engine.world,drag); drag=null; }
   if(bDrag&&bDrag.moved){
     const me=seq.find(s=>s.uid===bDrag.uid), rest=seq.filter(s=>s.uid!==bDrag.uid);
     const next=[...rest.slice(0,bDrag.insert),me,...rest.slice(bDrag.insert)];
-    boardPos.set(bDrag.uid,ptToMM(boardGeom(),bDrag.p));
+    boardPos.set(bDrag.uid,isNeck()?neckS(neckGeom(),toBoard(bDrag.p)):ptToMM(boardGeom(),bDrag.p));
     if(next.some((s,i)=>s.uid!==seq[i].uid)){ pushHistory(); seq=next; refresh(); }
   }
   if(!down.moved) select(down.uid);
   bDrag=null; down=null;
 }
 cv.addEventListener('pointerup',endPointer); cv.addEventListener('pointercancel',endPointer);
-cv.addEventListener('wheel',e=>{ if(mode!=='wear') return; e.preventDefault(); view.dist*=Math.exp(e.deltaY*.0015); viewClamp(); },{passive:false});
-cv.addEventListener('dblclick',()=>{ if(mode==='wear') viewReset(); });
+cv.addEventListener('wheel',e=>{
+  if(mode==='board'&&isNeck()){ e.preventDefault(); const p=ptOf(e), b=toBoard(p); NV.z*=Math.exp(-e.deltaY*.0015); NV.x=p.x-b.x*NV.z; NV.y=p.y-b.y*NV.z; clampNV(); return; }
+  if(mode!=='wear') return; e.preventDefault(); view.dist*=Math.exp(e.deltaY*.0015); viewClamp(); },{passive:false});
+cv.addEventListener('dblclick',()=>{ if(mode==='wear') viewReset(); else if(mode==='board'&&isNeck()){ NV.z=1; clampNV(); } });
 cv.addEventListener('contextmenu',e=>{ if(mode==='wear') e.preventDefault(); });
 
 /* ---------- 隨機選珠 / 隨機串珠 ---------- */
@@ -933,13 +1164,14 @@ function randomDesign(){
   const SP=pick(ITEMS.filter(i=>i.cat==='spacer'&&i.tone===(warm?GOLD:SILV)));
   const BALL=CAT[warm?'ballG3':'ballS3'];
   const U=pick([[M,SP,A,SP],[M,M,SP,A,SP],[M,BALL,A,BALL],[M,A,M,SP],[M,SP],[M,M,A]]);
-  const T=wristMM()+easeFor(M.d), uw=U.reduce((a,i)=>a+i.w,0), out=[]; let W=0;
+  const T=isNeck()?(neckCM()*10-claspW())*(NK.chain?.45:1):wristMM()+easeFor(M.d), uw=U.reduce((a,i)=>a+i.w,0), out=[]; let W=0;
   while(W+uw<=T+1){ U.forEach(i=>out.push(i)); W+=uw; }
   for(let k=0;T-W>1.5&&k<40;k++){
     const r=T-W, nx=U[out.length%U.length];
     const f=nx.w<=r+2?nx:[M,A,SP,BALL].filter(i=>i.w<=r+2).sort((a,b)=>b.w-a.w)[0];
     if(!f) break; out.push(f); W+=f.w;
   }
+  if(isNeck()&&Math.random()<.5){ const pd=ITEMS.filter(i=>i.cat==='pendant'); if(pd.length) out.splice(Math.floor(out.length/2),0,pick(pd)); }
   return out.map(i=>i.id);
 }
 function randomPick(){
@@ -961,38 +1193,42 @@ function shuffleString(){
 
 /* ---------- UI ---------- */
 const HINTS={dish:'拖曳移動・點一下選取',board:'拖曳珠子換順序',wear:''};
+const hintFor=m=>m==='board'&&isNeck()?'拖曳換順序・雙指放大':HINTS[m];
 const modeListeners=[];
 function setMode(m){
   mode=m; bDrag=null; down=null; stage.dataset.mode=m;
   document.querySelectorAll('.view').forEach(v=>v.setAttribute('aria-selected',v.dataset.mode===m));
   document.getElementById('shakeBtn').hidden=m!=='dish';
-  document.getElementById('centerBtn').hidden=m!=='wear';
-  document.getElementById('flipBtn').hidden=m!=='wear';
-  tonesEl.hidden=m!=='wear'; tonesEl.title='拖曳旋轉・雙指縮放・Shift 拖曳平移'; gl.hidden=m!=='wear'; if(m!=='wear') w3msg.hidden=true;
+  const w3=m==='wear'&&!isNeck();
+  document.getElementById('centerBtn').hidden=!w3;
+  document.getElementById('flipBtn').hidden=!w3;
+  tonesEl.hidden=!w3; tonesEl.title='拖曳旋轉・雙指縮放・Shift 拖曳平移'; gl.hidden=!w3; if(!w3) w3msg.hidden=true;
   document.getElementById('hint').hidden=m==='wear';
   touches.clear(); pinch=null;
-  document.getElementById('hint').textContent=HINTS[m];
+  document.getElementById('hint').textContent=hintFor(m);
   if(m==='dish') bodies.forEach(b=>Body.setVelocity(b,{x:(Math.random()-.5)*3,y:(Math.random()-.5)*3}));
-  modeListeners.forEach(fn=>{ try{ fn(m); }catch(e){ console.warn(e); } });
+  modeListeners.forEach(fn=>{ try{ fn(m); }catch(e){ console.warn(e); } });   // also fires when the type changes
 }
-const CATS=[['all','全部'],['bead','主珠'],['spacer','隔片'],['ball','隔珠'],['used','使用中']];
+const CATS=[['all','全部'],['bead','主珠'],['spacer','隔片'],['ball','隔珠'],['pendant','墜子'],['clasp','扣頭'],['chain','鍊條'],['used','使用中']];
 const COLORS=[['all','全部顏色'],['clear','白透','#e9eeec'],['grey','灰','#9aa0a3'],['black','黑','#2b2b2d'],['green','綠','#a9c76a'],['yellow','黃金','#e2c25c'],['pink','粉','#efb3bd'],['purple','紫','#a985c4'],['blue','藍','#9fc7d8']];
 let fCat='all', fColor='all';
 const thumbs={};
-ITEMS.forEach(it=>{ const c=document.createElement('canvas'); c.width=c.height=128; const x=c.getContext('2d'); x.scale(2,2); x.translate(32,32); drawItem(x,it,5); thumbs[it.id]=c.toDataURL(); });
+ITEMS.forEach(it=>{ const c=document.createElement('canvas'); c.width=c.height=128; const x=c.getContext('2d'); x.scale(2,2); x.translate(32,32); drawItem(x,it,Math.min(5,52/Math.max(it.d,it.w))); thumbs[it.id]=c.toDataURL(); });
 const tabsEl=document.getElementById('tabs'), dotsEl=document.getElementById('dots'), gridEl=document.getElementById('grid');
 CATS.forEach(([k,l])=>{ const b=document.createElement('button'); b.className='tab'; b.setAttribute('role','tab'); b.id='tab-'+k; b.textContent=l;
   b.setAttribute('aria-selected',k===fCat); b.onclick=()=>{ fCat=k; tabsEl.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected',t===b)); renderGrid(); }; tabsEl.appendChild(b); });
 COLORS.forEach(([k,l,c])=>{ const b=document.createElement('button'); b.className='dot'+(k==='all'?' all':''); b.id='dot-'+k; if(c) b.style.background=c;
   b.setAttribute('aria-label',l); b.title=l; b.setAttribute('aria-pressed',k===fColor);
   b.onclick=()=>{ fColor=k; dotsEl.querySelectorAll('.dot').forEach(d=>d.setAttribute('aria-pressed',d===b)); renderGrid(); }; dotsEl.appendChild(b); });
-function counts(){ const m={}; seq.forEach(s=>m[s.id]=(m[s.id]||0)+1); return m; }
+function counts(){ const m={}; seq.forEach(s=>m[s.id]=(m[s.id]||0)+1); if(isNeck()){ if(NK.clasp) m[NK.clasp]=1; if(NK.chain) m[NK.chain]=1; } return m; }
+const forType=it=>Array.isArray(it.use_for)&&it.use_for.length?it.use_for.includes(TYPE):isNeck()||!PART_CATS.has(it.cat);
 function renderGrid(){
   const cnt=counts();
-  const list=ITEMS.filter(it=>(fCat==='all'||(fCat==='used'?cnt[it.id]:it.cat===fCat))&&(fColor==='all'||it.color===fColor));
+  const list=ITEMS.filter(it=>forType(it)&&(fCat==='all'||(fCat==='used'?cnt[it.id]:it.cat===fCat))&&(fColor==='all'||it.color===fColor));
   gridEl.innerHTML=list.length?'':`<p class="empty">${fCat==='used'?'還沒有用到任何素材':'這個分類沒有這個顏色的素材'}</p>`;
   list.forEach(it=>{ const c=document.createElement('div'); c.className='card'; c.id='card-'+it.id;
-    c.innerHTML=`<button class="add" aria-label="加入${it.name} ${sizeLabel(it)}，NT$${it.price}"><img alt="" width="64" height="64" src="${it.images[0]||thumbs[it.id]}"><span class="n">${it.name}</span><span class="s">${sizeLabel(it)}</span><span class="p">NT$${it.price}</span></button><button class="info" aria-label="${it.name}介紹">i</button>${cnt[it.id]?`<span class="b">${cnt[it.id]}</span>`:''}`;
+    const part=it.cat==='clasp'||it.cat==='chain', act=part?(cnt[it.id]?`取消${it.name}`:`使用${it.name}`):`加入${it.name}`;
+    c.innerHTML=`<button class="add" aria-label="${act} ${sizeLabel(it)}，${priceLabel(it)}"><img alt="" width="64" height="64" src="${it.images[0]||thumbs[it.id]}"><span class="n">${it.name}</span><span class="s">${sizeLabel(it)}</span><span class="p">${priceLabel(it)}</span></button><button class="info" aria-label="${it.name}介紹">i</button>${cnt[it.id]?`<span class="b">${part?'使用中':cnt[it.id]}</span>`:''}`;
     c.querySelector('.add').onclick=()=>addItem(it.id); c.querySelector('.info').onclick=()=>openInfo(it.id); gridEl.appendChild(c); });
 }
 function select(uid){
@@ -1002,8 +1238,10 @@ function select(uid){
   const it=CAT[s.id]; el.hidden=false;
   document.getElementById('selName').innerHTML=`${it.name}<span>${sizeLabel(it)} · NT$${it.price}</span>`;
 }
+function designPrice(){ return seq.reduce((a,s)=>a+CAT[s.id].price,0)+(isNeck()?(NK.clasp&&CAT[NK.clasp]?CAT[NK.clasp].price:0)+chainPrice():0); }
 function refresh(){
-  const price=seq.reduce((a,s)=>a+CAT[s.id].price,0), W=totalW(), T=targetLen(), diff=T-W;
+  if(isNeck()) return refreshNeck();
+  const price=designPrice(), W=totalW(), T=targetLen(), diff=T-W;
   document.getElementById('price').textContent='NT$'+price.toLocaleString('en-US');
   document.getElementById('count').textContent=seq.length+' 顆';
   const m=document.getElementById('lenMain');
@@ -1017,6 +1255,37 @@ function refresh(){
   document.getElementById('doneBtn').disabled=!seq.length;
   renderGrid();
 }
+function refreshNeck(){
+  const T=targetLen(), B=beadsW()+claspW(), m=document.getElementById('lenMain'), cm=neckCM();
+  document.getElementById('price').textContent='NT$'+designPrice().toLocaleString('en-US');
+  document.getElementById('count').textContent=seq.length+' 顆';
+  document.getElementById('neckName').textContent=neckName(cm);
+  if(NK.chain&&B<=T){ const c=chainMM(); m.className='ok'; m.textContent=c>0?`鍊條補 ${(c/10).toFixed(1)} cm`:'長度剛好'; }
+  else { const diff=T-B, ok=Math.abs(diff)<=TOL_MM, d1=Math.abs(diff).toFixed(1);
+    m.className=ok?'ok':diff<0?'over':''; m.textContent=diff===0?'長度剛好':ok?`合適・${diff>0?'少':'多'} ${d1} mm`:diff>0?`還差 ${d1} mm`:`超出 ${d1} mm`; }
+  document.getElementById('lenSub').textContent=`珠段 ${beadsW().toFixed(1)}＋扣頭 ${claspW()} / 目標 ${T} mm`;
+  document.getElementById('lenSub').title=NK.chain?'選了鍊條：珠子以外的長度由鍊條補滿，鍊條依公分計價':'沒有鍊條：珠子加扣頭要湊到目標長度';
+  document.getElementById('undoBtn').disabled=!history.length;
+  document.getElementById('shuffleBtn').disabled=seq.length<2;
+  document.getElementById('doneBtn').disabled=!seq.length&&!NK.chain;
+  renderGrid();
+}
+function setType(t){
+  if(t===TYPE) return;
+  store[TYPE]={seq:seq.map(s=>({...s})),history};
+  TYPE=t; const st=store[t]||{seq:[],history:[]};
+  history=st.history||[]; boardPos.clear(); boardCache=null; NV.z=1; clampNV(); select(null);
+  document.querySelectorAll('.typebtn').forEach(b=>b.setAttribute('aria-pressed',b.dataset.type===t));
+  document.getElementById('wristWrap').hidden=isNeck(); document.getElementById('neckWrap').hidden=!isNeck();
+  document.getElementById('v-board').textContent=isNeck()?'項鍊盤':'串珠盤';
+  document.getElementById('randBtn').title=isNeck()?'自動挑選搭配的素材，湊成一條項鍊':'自動挑選搭配的素材，湊成一條手串';
+  tabsEl.querySelectorAll('.tab').forEach(b=>{ const k=b.id.slice(4); b.hidden=!isNeck()&&PART_CATS.has(k); });
+  if(!isNeck()&&PART_CATS.has(fCat)){ fCat='all'; tabsEl.querySelectorAll('.tab').forEach(b=>b.setAttribute('aria-selected',b.id==='tab-all')); }
+  restore(st.seq);
+  setMode(mode);
+}
+document.querySelectorAll('.typebtn').forEach(b=>b.onclick=()=>setType(b.dataset.type));
+document.getElementById('neckLen').onchange=()=>{ boardCache=null; refresh(); };
 
 /* ---------- sheets ---------- */
 let lastFocus=null;
@@ -1034,7 +1303,7 @@ function md(src){
   if(list) out.push('<ul>'+list.join('')+'</ul>'); return out.join('');
 }
 const COLOR_NAME=Object.fromEntries(COLORS.map(([k,l])=>[k,l]));
-const CAT_NAME={bead:'主珠',spacer:'隔片',ball:'隔珠'};
+const CAT_NAME={bead:'主珠',spacer:'隔片',ball:'隔珠',pendant:'墜子',clasp:'扣頭',chain:'鍊條'};
 let infoId=null;
 function bigRender(it){ const c=document.createElement('canvas'); c.width=c.height=272; const x=c.getContext('2d'); x.scale(2,2); x.translate(68,68); drawItem(x,it,Math.min(10,100/Math.max(it.d,it.w))); return c.toDataURL(); }
 function openInfo(id){
@@ -1042,10 +1311,13 @@ function openInfo(id){
   const pics=it.images.length?it.images:[bigRender(it)];
   document.getElementById('infoGal').innerHTML=pics.map((u,i)=>`<img alt="${esc(it.name)} 照片 ${i+1}" src="${esc(u)}">`).join('');
   document.getElementById('infoTitle').textContent=it.name;
-  document.getElementById('infoMeta').textContent=`${sizeLabel(it)} · NT$${it.price} / 顆`;
+  document.getElementById('infoMeta').textContent=`${sizeLabel(it)} · ${priceLabel(it)}${it.kind==='chain'?'':' / 個'}`;
+  document.getElementById('infoAdd').textContent=it.cat==='clasp'||it.cat==='chain'?(counts()[id]?'取消使用':'使用這個'):'加入盤中';
+  document.getElementById('infoAdd').hidden=!forType(it);
   const chips=[CAT_NAME[it.cat],COLOR_NAME[it.color],...(inf.months||[]).map(m=>`${m} 月生日石`),...(inf.tags||[]).filter(t=>!/生日石/.test(t))];
   document.getElementById('infoChips').innerHTML=chips.filter(Boolean).map(t=>`<span class="chip">${esc(t)}</span>`).join('');
-  const props=[['尺寸',it.kind==='spacer'?`高 ${it.d}mm・串上佔 ${it.w}mm`:`直徑 ${it.d}mm`],['產地',inf.origin],['等級',inf.grade],['單價',`NT$${it.price}`]];
+  const size=it.kind==='spacer'?`高 ${it.d}mm・串上佔 ${it.w}mm`:it.kind==='clasp'?`長 ${it.w}mm（算進項鍊總長）`:it.kind==='chain'?`粗 ${it.d}mm・依長度計價`:it.kind==='pendant'?`高 ${it.d}mm`:`直徑 ${it.d}mm`;
+  const props=[['尺寸',size],['產地',inf.origin],['等級',inf.grade],['單價',priceLabel(it)]];
   document.getElementById('infoProps').innerHTML=props.filter(p=>p[1]).map(([k,v])=>`<dt>${k}</dt><dd>${esc(v)}</dd>`).join('');
   document.getElementById('infoBlocks').innerHTML=[['價格說明',inf.price],['故事',inf.story],['寓意',inf.meaning]].filter(b=>b[1])
     .map(([h,t])=>`<section class="blk"><h3>${h}</h3><div class="md">${md(t)}</div></section>`).join('');
@@ -1074,14 +1346,24 @@ function buildOrder(){
   seq.forEach(s=>{ const it=CAT[s.id]; const g=groups.get(s.id)||{id:s.id,name:it.name,size:sizeLabel(it),unit:it.price,qty:0}; g.qty++; groups.set(s.id,g); });
   const items=[...groups.values()].map(g=>({...g,subtotal:g.unit*g.qty}));
   const code=Math.random().toString(36).slice(2,8).toUpperCase();
-  return { code, createdAt:new Date().toISOString(), wristMM:wristMM(), fit:document.getElementById('fit').selectedOptions[0].text,
-    lengthMM:+totalW().toFixed(1), targetMM:targetLen(), count:seq.length, total:items.reduce((a,i)=>a+i.subtotal,0),
-    items, sequence:seq.map(s=>({id:s.id,v:s.v})), source:BeadStudio.orderSource };
+  const base={ code, createdAt:new Date().toISOString(), type:TYPE, count:seq.length, sequence:seq.map(s=>({id:s.id,v:s.v})), source:BeadStudio.orderSource };
+  if(isNeck()){
+    let clasp=null, chain=null;
+    if(NK.clasp&&CAT[NK.clasp]){ const it=CAT[NK.clasp]; clasp={id:it.id}; items.push({id:it.id,name:it.name,size:sizeLabel(it),unit:it.price,qty:1,subtotal:it.price}); }
+    if(NK.chain&&CAT[NK.chain]&&chainMM()>0){ const it=CAT[NK.chain], cm=Math.ceil(chainMM()/10); chain={id:it.id,cm};
+      items.push({id:it.id,name:it.name,size:sizeLabel(it),unit:it.price,unitLabel:`NT$${it.price}/cm`,qty:cm,qtyLabel:`${cm} cm`,subtotal:it.price*cm}); }
+    return {...base, lengthCM:neckCM(), neckName:neckName(neckCM()), lengthMM:+totalW().toFixed(1), targetMM:targetLen(), clasp, chain,
+      total:items.reduce((a,i)=>a+i.subtotal,0), items};
+  }
+  return {...base, wristMM:wristMM(), fit:document.getElementById('fit').selectedOptions[0].text,
+    lengthMM:+totalW().toFixed(1), targetMM:targetLen(), total:items.reduce((a,i)=>a+i.subtotal,0), items};
 }
 function orderText(o){
   const d=new Date(o.createdAt), ds=`${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
-  const lines=[`【手串設計單】#${o.code}　${ds}`,`手圍 ${o.wristMM/10} cm（${o.fit}）｜已串 ${o.lengthMM} mm／目標 ${o.targetMM} mm`,'──────────'];
-  o.items.forEach(i=>lines.push(`${i.name} ${i.size}　× ${i.qty}　NT$${i.subtotal.toLocaleString('en-US')}`));
+  const neck=o.type==='necklace';
+  const lines=[`【${neck?'項鍊':'手串'}設計單】#${o.code}　${ds}`,
+    neck?`長度 ${o.lengthCM} cm（${o.neckName}）｜${o.chain?'珠子＋鍊條':'全珠'}${o.clasp?'｜'+CAT[o.clasp.id].name:''}`:`手圍 ${o.wristMM/10} cm（${o.fit}）｜已串 ${o.lengthMM} mm／目標 ${o.targetMM} mm`,'──────────'];
+  o.items.forEach(i=>lines.push(`${i.name} ${i.size}　× ${i.qtyLabel||i.qty}　NT$${i.subtotal.toLocaleString('en-US')}`));
   lines.push('──────────',`共 ${o.count} 顆　合計 NT$${o.total.toLocaleString('en-US')}`,'',
     '串法順序：'+o.sequence.map(s=>{ const it=CAT[s.id]; return it.name+(it.kind==='spacer'?'':it.d); }).join(' → '));
   return lines.join('\n');
@@ -1091,24 +1373,25 @@ function renderSheetImage(o){
   const c=document.createElement('canvas'); c.width=W; c.height=H; const x=c.getContext('2d');
   const ink='#1c2523', mute='#66716c', line='#d2d7d1', acc='#8f6b2a';
   x.fillStyle='#f4f5f1'; x.fillRect(0,0,W,H);
-  x.fillStyle=ink; x.font='600 46px "Noto Serif TC",serif'; x.textBaseline='alphabetic'; x.fillText('手串設計單',P,P+46);
+  const neck=o.type==='necklace';
+  x.fillStyle=ink; x.font='600 46px "Noto Serif TC",serif'; x.textBaseline='alphabetic'; x.fillText(neck?'項鍊設計單':'手串設計單',P,P+46);
   const d=new Date(o.createdAt); x.fillStyle=mute; x.font='400 24px "IBM Plex Mono",monospace';
   x.fillText(`#${o.code}  ${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`,P,P+92);
   let y=P+120;
   const g=x.createRadialGradient(W/2,y+380,80,W/2,y+476,700); g.addColorStop(0,'#1d3c39'); g.addColorStop(1,'#0d2120');
   x.fillStyle=g; rrect(x,P,y,952,952,8); x.fill();
   x.drawImage(snapshotBoard(952),P,y,952,952); y+=952+48;
-  const stats=[['總價',`NT$${o.total.toLocaleString('en-US')}`],['顆數',`${o.count} 顆`],['串長',`${o.lengthMM} mm`]];
+  const stats=[['總價',`NT$${o.total.toLocaleString('en-US')}`],['顆數',`${o.count} 顆`],neck?['長度',`${o.lengthCM} cm`]:['串長',`${o.lengthMM} mm`]];
   stats.forEach(([k,v],i)=>{ const sx=P+i*318; x.fillStyle=mute; x.font='400 24px "Noto Sans TC",sans-serif'; x.fillText(k,sx,y+28);
     x.fillStyle=i===0?acc:ink; x.font='500 44px "IBM Plex Mono",monospace'; x.fillText(v,sx,y+84); });
-  x.fillStyle=mute; x.font='400 22px "Noto Sans TC",sans-serif'; x.fillText(`手圍 ${o.wristMM/10} cm・${o.fit}・目標 ${o.targetMM} mm`,P,y+124);
+  x.fillStyle=mute; x.font='400 22px "Noto Sans TC",sans-serif'; x.fillText(neck?`${o.neckName}・${o.chain?'珠子＋鍊條':'全珠'}${o.clasp?'・'+CAT[o.clasp.id].name:''}`:`手圍 ${o.wristMM/10} cm・${o.fit}・目標 ${o.targetMM} mm`,P,y+124);
   y+=150; x.strokeStyle=line; x.lineWidth=2; x.beginPath(); x.moveTo(P,y); x.lineTo(W-P,y); x.stroke();
-  o.items.forEach(i=>{ const it=CAT[i.id], sp=sprite(it,5.2,0), cy0=y+42;
+  o.items.forEach(i=>{ const it=CAT[i.id], sp=sprite(it,Math.min(5.2,56/Math.max(it.d,it.w)),0), cy0=y+42;
     x.drawImage(sp.cv,P+30-sp.half,cy0-sp.half,sp.half*2,sp.half*2);
     x.fillStyle=ink; x.font='500 30px "Noto Serif TC",serif'; x.textAlign='left'; x.fillText(i.name,P+84,cy0+2);
-    x.fillStyle=mute; x.font='400 22px "IBM Plex Mono",monospace'; x.fillText(`${i.size} · NT$${i.unit}`,P+84,cy0+32);
+    x.fillStyle=mute; x.font='400 22px "IBM Plex Mono",monospace'; x.fillText(`${i.size} · ${i.unitLabel||'NT$'+i.unit}`,P+84,cy0+32);
     x.fillStyle=ink; x.font='500 28px "IBM Plex Mono",monospace'; x.textAlign='right';
-    x.fillText(`× ${i.qty}`,W-P-220,cy0+10); x.fillText(`NT$${i.subtotal.toLocaleString('en-US')}`,W-P,cy0+10); x.textAlign='left';
+    x.fillText(i.qtyLabel||`× ${i.qty}`,W-P-220,cy0+10); x.fillText(`NT$${i.subtotal.toLocaleString('en-US')}`,W-P,cy0+10); x.textAlign='left';
     y+=84; x.strokeStyle=line; x.lineWidth=1; x.beginPath(); x.moveTo(P,y); x.lineTo(W-P,y); x.stroke(); });
   x.fillStyle=ink; x.font='600 32px "Noto Sans TC",sans-serif'; x.fillText('合計',P,y+56);
   x.textAlign='right'; x.fillStyle=acc; x.font='500 40px "IBM Plex Mono",monospace'; x.fillText(`NT$${o.total.toLocaleString('en-US')}`,W-P,y+58); x.textAlign='left';
@@ -1117,7 +1400,7 @@ function renderSheetImage(o){
 }
 let lastOrder=null;
 function openExport(){
-  if(!seq.length) return;
+  if(!seq.length&&!(isNeck()&&NK.chain)) return;
   const o=buildOrder(); lastOrder=o;
   try{ document.getElementById('expImg').src=renderSheetImage(o); document.getElementById('expImg').hidden=false; }
   catch(err){ console.warn('sheet image',err); document.getElementById('expImg').hidden=true; }
@@ -1143,12 +1426,13 @@ document.getElementById('submitBtn').onclick=async()=>{
    tinted by their 色系, so a new product shows up before it has been photographed. */
 const COLOR_BASE={clear:[226,233,233],grey:[128,134,138],black:[34,33,36],green:[150,200,120],yellow:[236,188,78],pink:[240,184,196],purple:[150,94,186],blue:[168,210,226]};
 function fromServer(r){
-  const local=CAT[r.id]||{}, kind=r.kind||local.kind||(r.cat==='spacer'?'spacer':r.cat==='ball'?'metal':'gem');
+  const local=CAT[r.id]||{}, kind=PART_CATS.has(r.cat)?r.cat:(r.kind||local.kind||(r.cat==='spacer'?'spacer':r.cat==='ball'?'metal':'gem'));
   const it=Object.assign({},local,r,{kind});
   it.d=+it.d||8; it.w=+r.w||(kind==='spacer'?2:it.d); it.price=+it.price||0;
-  it.images=r.images||[]; it.info=Object.assign({},local.info||{},r.info||{});
-  if(kind==='gem'&&!it.p) it.p={base:COLOR_BASE[it.color]||[200,200,200],clear:it.color==='black'?0:.5,glow:[255,255,255]};
-  if((kind==='metal'||kind==='spacer')&&!it.tone) it.tone=it.color==='yellow'?GOLD:SILV;
+  it.images=r.images||[]; it.info=Object.assign({},INFO[PART_CATS.has(it.cat)?it.cat:'']||{},local.info||{},r.info||{});
+  if(!it.variant) it.variant=kind==='clasp'?'lobster':kind==='pendant'?'pearl':undefined;
+  if((kind==='gem'||kind==='pendant')&&!it.p) it.p={base:COLOR_BASE[it.color]||[200,200,200],clear:it.color==='black'?0:.5,glow:[255,255,255]};
+  if((kind==='metal'||kind==='spacer'||kind==='clasp'||kind==='chain'||kind==='pendant')&&!it.tone) it.tone=it.color==='yellow'?GOLD:SILV;
   return it;
 }
 if(CONFIG.apiBase){
@@ -1193,7 +1477,7 @@ const BeadStudio = window.BeadStudio = {
   orderSource: 'web',                      // saved with each order so test pages can be told apart
   // current design for renderers outside the page (AR): bead list in stringing order, sizes in mm,
   // v = which photo, gw = this bead's share of any bare cord
-  design(){ return { wristMM:wristMM(), beads:seq.map(s=>{ const it=CAT[s.id]; return {uid:s.uid,id:s.id,kind:it.kind,d:it.d,w:it.w,v:s.v,gw:gw(s.uid)}; }) }; },
+  design(){ return { type:TYPE, wristMM:wristMM(), beads:seq.map(s=>{ const it=CAT[s.id]; return {uid:s.uid,id:s.id,kind:it.kind,d:it.d,w:it.w,v:s.v,gw:gw(s.uid)}; }) }; },
   // bead picture (photo or drawn) as a canvas; mm = real width the canvas covers
   beadImage(id,v=0){ const it=CAT[id]; if(!it) return null; const sp=sprite(it,12,v); return {canvas:sp.cv,mm:sp.half*2/12}; },
 };
