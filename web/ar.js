@@ -621,6 +621,14 @@ const NECK_DROP=17;
    衣服、聳肩會讓肩膀偵測點左右不對稱，只用肩膀中點會整條偏一邊（實測偏右 1～2 顆） */
 const FACE_W=.5;
 const ADJ_KEY='bead-ar-neck-adj';
+/* 手機仰角：自拍時手機通常拿在胸口高度、鏡頭往上看。不算這個的話，項鍊後半圈會被畫得太高，
+   整條看起來像很深的 U 字（第 1 版實測）。用手機的方向感測器（beta：直立＝90°）算出鏡頭往上幾度；
+   沒有感測器或橫拿時當作 0°。 */
+function onOrient(e){ if(e.beta==null) return; AR.orient={beta:e.beta,gamma:e.gamma||0,t:performance.now()}; }
+function cameraPitch(now){
+  const o=AR.orient; if(!o||now-o.t>2000||Math.abs(o.gamma)>50) return F('npitch',0,now,.5,.05);
+  return F('npitch',Math.max(-40,Math.min(60,90-o.beta))*Math.PI/180,now,.5,.05);
+}
 try{ const a=JSON.parse(localStorage.getItem(ADJ_KEY)||'null'); if(a){ NECK.lift=+a.lift||0; NECK.side=+a.side||0; } }catch{}
 const saveAdj=()=>{ try{ localStorage.setItem(ADJ_KEY,JSON.stringify({lift:NECK.lift,side:NECK.side})); }catch{} };
 const linkTexCache={};
@@ -654,7 +662,8 @@ function neckPoseRaw(lm,world,cam){
   const a=cam.toPx(lm[11]), b=cam.toPx(lm[12]), dx=a[0]-b[0], dy=a[1]-b[1], pw=Math.hypot(dx,dy);
   if(pw<25) return null;
   const wd=sub(W3(world[11]),W3(world[12])), wl=len(wd);
-  const yaw=Math.max(-.9,Math.min(.9,Math.atan2(wd[2]*Z_SIGN,Math.hypot(wd[0],wd[1])||1e-6)));
+  // 轉身角度：偵測點的前後深度雜訊大（正對鏡頭也常讀到 10～15°），扣掉 8° 再打七折
+  const y0=Math.atan2(wd[2]*Z_SIGN,Math.hypot(wd[0],wd[1])||1e-6), yaw=Math.max(-.8,Math.min(.8,Math.sign(y0)*Math.max(0,Math.abs(y0)-8*Math.PI/180)*.7));
   const avg=NECK.shape&&NECK.shape.sex==='m'?.37:.33;               // 肩膀關節點的間距，男女平均（公尺）
   const Wr=Math.sqrt(avg*Math.max(.26,Math.min(.46,wl||avg)));      // 偵測值和平均值各半（幾何平均）
   let mx=(a[0]+b[0])/2, my=(a[1]+b[1])/2;
@@ -671,8 +680,9 @@ function neckPoseSmooth(r,t){
 /* 人模座標（mm；x＝本人左手邊、y 上、z 朝前）→ 相機座標（公尺；x 右、y 下、z 遠） */
 function neckFrame(p,cam){
   const O=[(p.mx-cam.ppx)*p.Z/cam.f,(p.my-cam.ppy)*p.Z/cam.f,p.Z];
-  const ux=Math.cos(p.roll), uy=Math.sin(p.roll), cy=Math.cos(p.yaw), sy=Math.sin(p.yaw);
-  const ex=[cy*ux,cy*uy,sy], ez=norm(cross(ex,[uy,-ux,0])), up=cross(ez,ex);
+  const ux=Math.cos(p.roll), uy=Math.sin(p.roll), cy=Math.cos(p.yaw), sy=Math.sin(p.yaw), ct=Math.cos(p.pitch||0), st=Math.sin(p.pitch||0);
+  // 身體直立：重力的「上」在相機座標裡＝畫面上方（依肩線轉 roll）再往鏡頭前方傾斜 pitch
+  const ex=[cy*ux,cy*uy,sy], ez=norm(cross(ex,[uy*ct,-ux*ct,st])), up=cross(ez,ex);
   const sh=NECK.shape.shoulders, M=[(sh[0][0]+sh[1][0])/2-NECK.side,(sh[0][1]+sh[1][1])/2+NECK_DROP-NECK.lift,(sh[0][2]+sh[1][2])/2], k=AR.scale/1000;
   const toCam=q=>{ const d=[q[0]-M[0],q[1]-M[1],q[2]-M[2]];
     return [O[0]+(ex[0]*d[0]+up[0]*d[1]+ez[0]*d[2])*k, O[1]+(ex[1]*d[0]+up[1]*d[1]+ez[1]*d[2])*k, O[2]+(ex[2]*d[0]+up[2]*d[1]+ez[2]*d[2])*k]; };
@@ -771,6 +781,10 @@ async function openCamera(){
 async function startAR(){
   $('arDlg').hidden=true; $('arView').hidden=false; $('arShot').hidden=true; BS.setPaused(true); arMsg('');
   if(AR.facingKind!==AR.kind){ AR.facing=K().facing; AR.facingKind=AR.kind; }
+  if(AR.kind==='neck'){
+    try{ const D=window.DeviceOrientationEvent; if(D&&typeof D.requestPermission==='function') D.requestPermission().catch(()=>{}); }catch{}   // iPhone 需要使用者同意
+    addEventListener('deviceorientation',onOrient);
+  }
   const neck=AR.kind==='neck';
   $('arGuide').textContent=K().guide; $('arGuide').classList.toggle('wide',neck);
   $('arUp').hidden=$('arDown').hidden=$('arLiftLbl').hidden=!neck;
@@ -815,6 +829,7 @@ async function startAR(){
   AR.running=true; AR.fps=[]; AR.lastSeen=0; requestAnimationFrame(arLoop);
 }
 function stopAR(){
+  removeEventListener('deviceorientation',onOrient); AR.orient=null;
   AR.running=false; AR.session=(AR.session||0)+1;
   if(AR.stream){ AR.stream.getTracks().forEach(t=>t.stop()); AR.stream=null; }
   arVideo.srcObject=null; $('arView').hidden=true; BS.setPaused(false); $('arBtn').focus();
@@ -881,9 +896,9 @@ function neckFrameStep(res,cam,now,cw,ch,d,toPx){
   $('arGuide').hidden=!!raw;
   if(raw){
     AR.lastSeen=now; sampleLight(now);
-    const p=neckPoseSmooth(raw,now), fr=placeNecklaceAR(p,cam,cw,ch); placeFace(lm,cam,p); G.group.visible=true;
+    const p=neckPoseSmooth(raw,now); p.pitch=cameraPitch(now); const fr=placeNecklaceAR(p,cam,cw,ch); placeFace(lm,cam,p); G.group.visible=true;
     if(AR.skel) drawNeckSkeleton(lm,toPx,d,fr,cam);
-    $('arHudR').textContent=AR.skel?`轉身 ${Math.round(p.yaw*180/Math.PI)}°・距離 ${Math.round(p.Z*100)} cm・偏移 ${NECK.side} / ${NECK.lift} mm`:'拖曳可移動・點兩下還原';
+    $('arHudR').textContent=AR.skel?`轉身 ${Math.round(p.yaw*180/Math.PI)}°・距離 ${Math.round(p.Z*100)} cm・仰角 ${AR.orient?Math.round(p.pitch*180/Math.PI)+'°':'無感測器'}・偏移 ${NECK.side} / ${NECK.lift} mm`:'拖曳可移動・點兩下還原';
   } else {
     $('arHudR').textContent=NECK.shape?K().lost:'';
     if(now-AR.lastSeen>350){ G.group.visible=G.face.visible=false; resetFilters(); }

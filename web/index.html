@@ -1215,7 +1215,10 @@ function necklaceNodes(){
 }
 function initNecklace(){
   const P=bustParams(), {nodes,L}=necklaceNodes(), R=Math.max(L/TAU,P.nr+8);
-  let s=0; nodes.forEach((n,i)=>{ const a=(s+n.w/2)/L*TAU; s+=n.w;
+  // 珠子段的正中間（含墜子）轉到正前方；扣頭因此會離正後方偏一點點（半個扣頭長）
+  const i0=nodes.findIndex(n=>n.kind==='bead'||n.kind==='pendant'), i1=nodes.length-1-[...nodes].reverse().findIndex(n=>n.kind==='bead'||n.kind==='pendant');
+  let off=0; if(i0>=0){ let c=0; nodes.forEach((n,i)=>{ if(i<i0) off+=n.w; if(i>=i0&&i<=i1) c+=n.w; }); off=off+c/2-L/2; }
+  let s=-off; nodes.forEach((n,i)=>{ const a=(s+n.w/2)/L*TAU; s+=n.w;
     // index 0 (clasp) at the back, going round so the strand's middle ends up at the front
     const p=[Math.sin(a)*R,6,-Math.cos(a)*R-6]; n.p=p; n.q=p.slice(); });
   NS.nodes=nodes; NS.rest=nodes.map((n,i)=>(n.w+nodes[(i+1)%nodes.length].w)/2); NS.steps=0; NS.csdf=MB.neckline==='none'?torsoSDF(P):(()=>{ const t=torsoSDF(P), c=clothesSDF(P); return (x,y,z)=>Math.min(t(x,y,z),c(x,y,z)); })();
@@ -1226,7 +1229,8 @@ function simNecklace(maxSteps){
   for(let st=0;st<maxSteps&&NS.steps<700;st++,NS.steps++){
     for(const n of N){ const p=n.p, v=[(p[0]-n.q[0])*.985,(p[1]-n.q[1])*.985,(p[2]-n.q[2])*.985]; n.q=p.slice(); p[0]+=v[0]; p[1]+=v[1]-g; p[2]+=v[2]; }
     for(let it=0;it<8;it++){
-      for(let i=0;i<N.length;i++){ const a=N[i].p, b=N[(i+1)%N.length].p, dx=b[0]-a[0], dy=b[1]-a[1], dz=b[2]-a[2], d=Math.hypot(dx,dy,dz)||1e-6, k=(d-NS.rest[i])/d*.5;
+      // 約束每輪換方向解，避免單一方向的累積誤差讓整條項鍊繞著脖子轉（墜子偏離正中間）
+      for(let ii=0;ii<N.length;ii++){ const i=it&1?N.length-1-ii:ii, a=N[i].p, b=N[(i+1)%N.length].p, dx=b[0]-a[0], dy=b[1]-a[1], dz=b[2]-a[2], d=Math.hypot(dx,dy,dz)||1e-6, k=(d-NS.rest[i])/d*.5;
         a[0]+=dx*k; a[1]+=dy*k; a[2]+=dz*k; b[0]-=dx*k; b[1]-=dy*k; b[2]-=dz*k; }
       for(const n of N){ const p=n.p, d=f(p[0],p[1],p[2])-n.r; if(d>=0) continue;
         const e=.6, gx=f(p[0]+e,p[1],p[2])-f(p[0]-e,p[1],p[2]), gy=f(p[0],p[1]+e,p[2])-f(p[0],p[1]-e,p[2]), gz=f(p[0],p[1],p[2]+e)-f(p[0],p[1],p[2]-e), gl=Math.hypot(gx,gy,gz)||1;
@@ -1415,9 +1419,12 @@ function randomDesign(){
     const f=nx.w<=r+2?nx:[M,A,SP,BALL].filter(i=>i.w<=r+2).sort((a,b)=>b.w-a.w)[0];
     if(!f) break; out.push(f); W+=f.w;
   }
-  if(isNeck()&&Math.random()<.5){ const pd=ITEMS.filter(i=>i.cat==='pendant'); if(pd.length) out.splice(Math.floor(out.length/2),0,pick(pd)); }
+  if(isNeck()&&Math.random()<.5){ const pd=ITEMS.filter(i=>i.cat==='pendant'); if(pd.length) out.splice(midIndex(out.map(i=>i.w)),0,pick(pd)); }
   return out.map(i=>i.id);
 }
+/* 串珠順序裡「長度的正中間」在第幾顆之前（墜子要放這裡才會掛在正前方；用顆數的一半會因珠子大小不同而偏掉） */
+function midIndex(ws){ const T=ws.reduce((a,w)=>a+w,0); let c=0;
+  for(let i=0;i<ws.length;i++){ if(c+ws[i]/2>=T/2) return i; c+=ws[i]; } return ws.length; }
 function randomPick(){
   pushHistory();
   restore(randomDesign().map(mk));
@@ -1426,11 +1433,16 @@ function randomPick(){
 function shuffleString(){
   if(seq.length<2) return;
   pushHistory(); gapW.clear();
-  const a=seq.map(s=>({...s}));
+  let a=seq.map(s=>({...s}));
+  // 項鍊：墜子不參與打亂，打亂後放回正中間
+  const pend=isNeck()?a.filter(s=>CAT[s.id].kind==='pendant'):[];
+  if(pend.length&&pend.length<a.length) a=a.filter(s=>CAT[s.id].kind!=='pendant');
+  else pend.length=0;
   for(let tries=0;tries<5;tries++){
     for(let i=a.length-1;i>0;i--){ const j=Math.random()*(i+1)|0; [a[i],a[j]]=[a[j],a[i]]; }
-    if(a.some((s,i)=>s.id!==seq[i].id)) break;
+    if(pend.length||a.some((s,i)=>s.id!==seq[i].id)) break;
   }
+  if(pend.length) a.splice(midIndex(a.map(s=>CAT[s.id].w)),0,...pend);
   seq=a; select(null); refresh();
   if(mode!=='board') setMode('board');
 }
