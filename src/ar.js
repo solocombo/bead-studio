@@ -50,7 +50,7 @@ const CSS = `
 .dlg .link{border:0;background:none;color:var(--muted);font-size:12px;text-decoration:underline;padding:0;align-self:flex-start}
 
 /* AR: camera view */
-.arview{position:fixed;inset:0;z-index:70;background:#000;color:#fff;overflow:hidden}
+.arview{position:fixed;inset:0;z-index:70;background:#000;color:#fff;overflow:hidden;touch-action:none}
 .arview video,.arview canvas{position:absolute;inset:0;width:100%;height:100%}
 .arview video{object-fit:cover}
 .arview.mirror video,.arview.mirror canvas{transform:scaleX(-1)}
@@ -614,7 +614,15 @@ function placeBracelet(pose,cam,cw,ch,scaleAdj,wristMM){
       人模的肩關節中點對到畫面上的雙肩中點；不同人肩膀高低不一樣，可用 ▲▼ 微調上下
    3. 遮擋：每顆珠子往鏡頭方向走，碰到人模的身體（脖子）就藏起來 → 後頸那段看不到；
       臉的輪廓（眼睛、嘴巴推出下巴）是看不見的遮擋片 → 低頭時下巴會蓋住項鍊 */
-const NECK={key:'',shape:null,items:[],lift:0,hidden:[],tick:0};
+const NECK={key:'',shape:null,items:[],lift:0,side:0,hidden:[],tick:0};
+/* 實測（第 1 版）：項鍊整體偏高約 15～20 mm → 預設往下 17 mm。▲▼ 和拖曳是在這之上的個人微調 */
+const NECK_DROP=17;
+/* 脖子的左右位置：雙肩中點和臉（嘴巴、鼻子）沿肩線方向各半。
+   衣服、聳肩會讓肩膀偵測點左右不對稱，只用肩膀中點會整條偏一邊（實測偏右 1～2 顆） */
+const FACE_W=.5;
+const ADJ_KEY='bead-ar-neck-adj';
+try{ const a=JSON.parse(localStorage.getItem(ADJ_KEY)||'null'); if(a){ NECK.lift=+a.lift||0; NECK.side=+a.side||0; } }catch{}
+const saveAdj=()=>{ try{ localStorage.setItem(ADJ_KEY,JSON.stringify({lift:NECK.lift,side:NECK.side})); }catch{} };
 const linkTexCache={};
 function linkTexture(tone){
   tone=tone||['#57400f','#b48728','#f7e3a0','#d2a43f','#664711']; const k=tone.join(); if(linkTexCache[k]) return linkTexCache[k];
@@ -649,7 +657,12 @@ function neckPoseRaw(lm,world,cam){
   const yaw=Math.max(-.9,Math.min(.9,Math.atan2(wd[2]*Z_SIGN,Math.hypot(wd[0],wd[1])||1e-6)));
   const avg=NECK.shape&&NECK.shape.sex==='m'?.37:.33;               // 肩膀關節點的間距，男女平均（公尺）
   const Wr=Math.sqrt(avg*Math.max(.26,Math.min(.46,wl||avg)));      // 偵測值和平均值各半（幾何平均）
-  return {mx:(a[0]+b[0])/2,my:(a[1]+b[1])/2,Z:cam.f*Wr*Math.cos(yaw)/pw,roll:Math.atan2(dy,dx),yaw};
+  let mx=(a[0]+b[0])/2, my=(a[1]+b[1])/2;
+  if([0,9,10].every(i=>(lm[i].visibility??1)>.5)){
+    const f=[0,9,10].map(i=>cam.toPx(lm[i])), fx=(f[0][0]+f[1][0]+f[2][0])/3, fy=(f[0][1]+f[1][1]+f[2][1])/3;
+    const ux=dx/pw, uy=dy/pw, along=Math.max(-.2*pw,Math.min(.2*pw,(fx-mx)*ux+(fy-my)*uy))*FACE_W;
+    mx+=ux*along; my+=uy*along; }
+  return {mx,my,Z:cam.f*Wr*Math.cos(yaw)/pw,roll:Math.atan2(dy,dx),yaw};
 }
 function neckPoseSmooth(r,t){
   const p={mx:F('nmx',r.mx,t,1.4,.5),my:F('nmy',r.my,t,1.4,.5),Z:F('nz',r.Z,t,.6,.05),roll:F('nroll',r.roll,t,1,.3),yaw:F('nyaw',r.yaw,t,.8,.2)};
@@ -660,7 +673,7 @@ function neckFrame(p,cam){
   const O=[(p.mx-cam.ppx)*p.Z/cam.f,(p.my-cam.ppy)*p.Z/cam.f,p.Z];
   const ux=Math.cos(p.roll), uy=Math.sin(p.roll), cy=Math.cos(p.yaw), sy=Math.sin(p.yaw);
   const ex=[cy*ux,cy*uy,sy], ez=norm(cross(ex,[uy,-ux,0])), up=cross(ez,ex);
-  const sh=NECK.shape.shoulders, M=[(sh[0][0]+sh[1][0])/2,(sh[0][1]+sh[1][1])/2-NECK.lift,(sh[0][2]+sh[1][2])/2], k=AR.scale/1000;
+  const sh=NECK.shape.shoulders, M=[(sh[0][0]+sh[1][0])/2-NECK.side,(sh[0][1]+sh[1][1])/2+NECK_DROP-NECK.lift,(sh[0][2]+sh[1][2])/2], k=AR.scale/1000;
   const toCam=q=>{ const d=[q[0]-M[0],q[1]-M[1],q[2]-M[2]];
     return [O[0]+(ex[0]*d[0]+up[0]*d[1]+ez[0]*d[2])*k, O[1]+(ex[1]*d[0]+up[1]*d[1]+ez[1]*d[2])*k, O[2]+(ex[2]*d[0]+up[2]*d[1]+ez[2]*d[2])*k]; };
   const proj=C=>[cam.ppx+cam.f*C[0]/C[2], cam.ppy+cam.f*C[1]/C[2]];
@@ -681,6 +694,7 @@ function neckOcclusion(fr){
 function placeNecklaceAR(p,cam,cw,ch){
   G.cam.left=0; G.cam.right=cw; G.cam.top=0; G.cam.bottom=-ch; G.cam.updateProjectionMatrix();
   const fr=neckFrame(p,cam), N=NECK.shape.nodes, sdf=NECK.shape.sdf, L=G.light;
+  AR.pxPerMM=AR.scale/1000*cam.f/p.Z;
   if((NECK.tick++%2)===0) neckOcclusion(fr);
   const pxPerMM=C=>AR.scale/1000*cam.f/C[2];
   for(const s of NECK.items){
@@ -869,15 +883,27 @@ function neckFrameStep(res,cam,now,cw,ch,d,toPx){
     AR.lastSeen=now; sampleLight(now);
     const p=neckPoseSmooth(raw,now), fr=placeNecklaceAR(p,cam,cw,ch); placeFace(lm,cam,p); G.group.visible=true;
     if(AR.skel) drawNeckSkeleton(lm,toPx,d,fr,cam);
-    $('arHudR').textContent=AR.skel?`轉身 ${Math.round(p.yaw*180/Math.PI)}°・距離 ${Math.round(p.Z*100)} cm`:'';
+    $('arHudR').textContent=AR.skel?`轉身 ${Math.round(p.yaw*180/Math.PI)}°・距離 ${Math.round(p.Z*100)} cm・偏移 ${NECK.side} / ${NECK.lift} mm`:'拖曳可移動・點兩下還原';
   } else {
     $('arHudR').textContent=NECK.shape?K().lost:'';
     if(now-AR.lastSeen>350){ G.group.visible=G.face.visible=false; resetFilters(); }
   }
 }
-function setLift(x){ NECK.lift=Math.max(-60,Math.min(60,x)); $('arLiftLbl').textContent=(NECK.lift>0?'+':'')+NECK.lift; }
+function setLift(x){ NECK.lift=Math.round(Math.max(-60,Math.min(60,x))); $('arLiftLbl').textContent=(NECK.lift>0?'+':'')+NECK.lift; saveAdj(); }
+setLift(NECK.lift);
 $('arUp').onclick=()=>setLift(NECK.lift+5);
 $('arDown').onclick=()=>setLift(NECK.lift-5);
+/* 項鍊模式：在畫面上拖曳＝直接移動項鍊（上下左右），點兩下＝回到預設位置。調整會記在這支手機上 */
+{ let drag=null;
+  const view=$('arView'), skip=e=>e.target.closest('button,.ar-shot');
+  view.addEventListener('pointerdown',e=>{ if(AR.kind!=='neck'||skip(e)||!AR.pxPerMM) return; drag={x:e.clientX,y:e.clientY,lift:NECK.lift,side:NECK.side}; view.setPointerCapture(e.pointerId); });
+  view.addEventListener('pointermove',e=>{ if(!drag) return;
+    const k=AR.pxPerMM, mir=view.classList.contains('mirror')?-1:1, dx=(e.clientX-drag.x)*mir/k, dy=(e.clientY-drag.y)/k;
+    NECK.side=Math.round(Math.max(-60,Math.min(60,drag.side+dx))); setLift(drag.lift-dy); });
+  const end=()=>{ if(drag){ drag=null; saveAdj(); } };
+  view.addEventListener('pointerup',end); view.addEventListener('pointercancel',end);
+  view.addEventListener('dblclick',e=>{ if(AR.kind!=='neck'||skip(e)) return; NECK.side=0; setLift(0); });
+}
 function setScale(x){ AR.scale=Math.max(.7,Math.min(1.4,Math.round(x*20)/20)); $('arScaleLbl').textContent=Math.round(AR.scale*100)+'%'; }
 $('arBig').onclick=()=>setScale(AR.scale+.05);
 $('arSmall').onclick=()=>setScale(AR.scale-.05);
