@@ -24,12 +24,14 @@ jobs:
       - name: Build pages from src/
         run: python3 scripts/build.py
       - uses: actions/configure-pages@v5
-      # AR 試戴用的手部偵測模型（約數 MB）：部署時下載，和網頁放在同一個網站，載入比較穩定
-      - name: Download hand landmarker model
+      # AR 試戴用的手部／人體偵測模型（各約數 MB）：部署時下載，和網頁放在同一個網站，載入比較穩定
+      - name: Download hand and pose landmarker models
         run: |
           mkdir -p web/models
           curl -fsSL -o web/models/hand_landmarker.task \
             https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task
+          curl -fsSL -o web/models/pose_landmarker_lite.task \
+            https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web

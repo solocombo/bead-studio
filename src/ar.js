@@ -1,4 +1,4 @@
-/* 串珠盤 AR 試戴外掛（測試版：第 2.1 階段）
+/* 串珠盤 AR 試戴外掛（測試版：手鍊第 2.1 階段＋項鍊第 1 版）
    只在 ar.html 載入；正式版 index.html 不會載入這個檔案。
    只透過 window.BeadStudio 介面和主程式溝通（見 src/bead-studio.html 最後面的 plugin interface）。
 
@@ -6,8 +6,10 @@
    2. 開相機、每格跑手部偵測，算出手腕的位置／方向／大小，把目前的設計戴上去
       第 2 階段：手腕遮擋後半圈、限制傾斜、依相機畫面調整亮度
       第 2.1 階段：從畫面上的膚色找出前臂，用前臂的方向和實際粗細對齊手鍊
+   3. 項鍊：前鏡頭自拍，用人體偵測（MediaPipe Pose）抓雙肩和臉，把「戴上看」人模上算好的下垂形狀戴上去；
+      後頸那段被脖子擋住、低頭時被下巴擋住
 
-   設定（可寫在 web/config.js 的 window.BEAD_CONFIG）：arLib / arWasm / arModel */
+   設定（可寫在 web/config.js 的 window.BEAD_CONFIG）：arLib / arWasm / arModel / arPoseModel */
 (() => {
 'use strict';
 const CFG = Object.assign({
@@ -15,6 +17,8 @@ const CFG = Object.assign({
   arWasm: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm',
   arModel:['models/hand_landmarker.task',
            'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'],
+  arPoseModel:['models/pose_landmarker_lite.task',
+           'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task'],
 }, window.BEAD_CONFIG||{});
 const TAU=Math.PI*2;
 const $=id=>document.getElementById(id);
@@ -52,6 +56,7 @@ const CSS = `
 .arview.mirror video,.arview.mirror canvas{transform:scaleX(-1)}
 .ar-hud{position:absolute;top:0;left:0;right:0;padding:calc(10px + env(safe-area-inset-top,0px)) 16px 10px;display:flex;justify-content:space-between;gap:8px;font-family:var(--f-num);font-size:12px;background:linear-gradient(rgba(0,0,0,.55),rgba(0,0,0,0))}
 .ar-hud b{font-weight:500;color:#cfe8b8}
+.ar-guide.wide{width:min(84vw,380px);top:44%}
 .ar-guide{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(70vw,320px);aspect-ratio:3/4;border:2px dashed rgba(255,255,255,.55);border-radius:18px;display:grid;place-items:end center;padding-bottom:14px;box-sizing:border-box;font-size:14px;text-align:center;pointer-events:none}
 .ar-bar{position:absolute;left:0;right:0;bottom:0;padding:12px 16px calc(14px + env(safe-area-inset-bottom,0px));display:flex;justify-content:space-between;align-items:center;gap:8px;background:linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.6))}
 .ar-bar button{padding:10px 14px;border-radius:999px;border:1px solid rgba(255,255,255,.4);background:rgba(0,0,0,.45);color:#fff;font-size:14px}
@@ -90,6 +95,9 @@ const MARKUP = `
     <button id="arBig" aria-label="手鍊放大">＋</button>
     <span class="lbl" id="arScaleLbl">100%</span>
     <button id="arSmall" aria-label="手鍊縮小">－</button>
+    <button id="arUp" aria-label="項鍊往上" hidden>▲</button>
+    <span class="lbl" id="arLiftLbl" hidden>0</span>
+    <button id="arDown" aria-label="項鍊往下" hidden>▼</button>
   </div>
   <div class="ar-bar">
     <button id="arClose">結束試戴</button>
@@ -113,14 +121,20 @@ BS.orderSource='ar-test';
 const st=document.createElement('style'); st.textContent=CSS; document.head.appendChild(st);
 document.body.insertAdjacentHTML('beforeend',MARKUP);
 BS.stage.insertAdjacentHTML('beforeend',BUTTON);
-BS.onModeChange(m=>{ $('arBtn').hidden=m!=='wear'||(BS.design().type==='necklace'); });   // 項鍊目前沒有 AR
+BS.onModeChange(m=>{ $('arBtn').hidden=m!=='wear'; });
 const CONFIG=CFG;
 
-const AR={ lib:null, lm:null, delegate:'', stream:null, facing:'environment', running:false, lastTs:0 };
+/* 兩種試戴：手鍊（後鏡頭拍手腕、手部偵測）、項鍊（前鏡頭自拍、人體偵測），各自有模型和檢查結果 */
+const KINDS={
+  hand:{label:'手部',mb:17,model:CONFIG.arModel,est:7.8e6,facing:'environment',ls:'bead-ar-check-v1',guide:'把手腕放進框內',lost:'尋找手部…'},
+  neck:{label:'人體',mb:15,model:CONFIG.arPoseModel,est:5.8e6,facing:'user',ls:'bead-ar-neck-check-v1',guide:'把臉和雙肩放進框內',lost:'尋找臉和肩膀…'},
+};
+const AR={ lib:null, lms:{}, bufs:{}, delegates:{}, kind:'hand', delegate:'', stream:null, facing:'environment', running:false, lastTs:0 };
+Object.defineProperty(AR,'lm',{get(){ return AR.lms[AR.kind]||null; }});
+const K=()=>KINDS[AR.kind];
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-const LS_KEY='bead-ar-check-v1';
-function lsGet(){ try{ return JSON.parse(localStorage.getItem(LS_KEY)||'null'); }catch{ return null; } }
-function lsSet(v){ try{ localStorage.setItem(LS_KEY,JSON.stringify(v)); }catch{} }
+function lsGet(){ try{ return JSON.parse(localStorage.getItem(K().ls)||'null'); }catch{ return null; } }
+function lsSet(v){ try{ localStorage.setItem(K().ls,JSON.stringify(v)); }catch{} }
 
 function inAppBrowser(){
   const ua=navigator.userAgent||'';
@@ -171,14 +185,15 @@ const withTimeout=(promise,ms,msg)=>Promise.race([promise,new Promise((_,rej)=>s
 const MB=n=>(n/1048576).toFixed(1);
 async function loadLandmarker(onProgress){
   if(AR.lm) return AR.lm;
+  const kind=AR.kind, KD=KINDS[kind];
   const say=p=>onProgress&&onProgress(p);
   say({stage:'download',loaded:0,total:0,text:'連線中'});
   if(!AR.lib) AR.lib=await withTimeout(import(CONFIG.arLib),30000,'AR 元件下載逾時');
-  const {FilesetResolver,HandLandmarker}=AR.lib;
+  const {FilesetResolver,HandLandmarker,PoseLandmarker}=AR.lib;
   const files=await FilesetResolver.forVisionTasks(CONFIG.arWasm);
   // 兩個大檔同時下載，合併計算進度（模型大小在下載前未知時先用 7.5 MB 估）
   // 大小未知（伺服器有壓縮）時用預估值；實際讀到的超過預估就跟著調大
-  const prog={wasm:[0,9.4e6],model:[0,7.8e6]}, fromCache={};
+  const prog={wasm:[0,AR.wasmUrl?0:9.4e6],model:[0,AR.bufs[kind]?0:KD.est]}, fromCache={wasm:AR.wasmUrl?1:0};
   const tick=()=>{ const l=prog.wasm[0]+prog.model[0], t=Math.max(prog.wasm[0],prog.wasm[1])+Math.max(prog.model[0],prog.model[1]);
     say({stage:'download',loaded:l,total:t,text:fromCache.wasm&&fromCache.model?'讀取快取':`下載中 ${MB(l)} / ${MB(t)} MB`}); };
   const wasmJob=(async()=>{
@@ -187,13 +202,13 @@ async function loadLandmarker(onProgress){
     AR.wasmUrl=URL.createObjectURL(new Blob([bytes],{type:'application/wasm'}));
   })();
   const modelJob=(async()=>{
-    if(AR.modelBuf) return;
+    if(AR.bufs[kind]) return;
     let lastErr;
-    for(const url of [].concat(CONFIG.arModel)){
-      try{ AR.modelBuf=await fetchWithProgress(url,(g,t,c)=>{ if(c) fromCache.model=1; prog.model=[g,t||prog.model[1]]; tick(); }); return; }
+    for(const url of [].concat(KD.model)){
+      try{ AR.bufs[kind]=await fetchWithProgress(url,(g,t,c)=>{ if(c) fromCache.model=1; prog.model=[g,t||prog.model[1]]; tick(); }); return; }
       catch(e){ lastErr=e; prog.model[0]=0; }
     }
-    throw lastErr||new Error('找不到手部模型');
+    throw lastErr||new Error(`找不到${KD.label}模型`);
   })();
   await Promise.all([wasmJob,modelJob]);
   if(AR.wasmUrl) files.wasmBinaryPath=AR.wasmUrl;
@@ -201,10 +216,13 @@ async function loadLandmarker(onProgress){
   for(const delegate of ['GPU','CPU']){
     try{
       say({stage:'init',text:delegate==='GPU'?'啟動中（GPU）':'GPU 無法使用，改用 CPU'});
-      AR.lm=await withTimeout(HandLandmarker.createFromOptions(files,{
-        baseOptions:{modelAssetBuffer:AR.modelBuf,delegate},runningMode:'VIDEO',numHands:1,
-        minHandDetectionConfidence:.5,minHandPresenceConfidence:.5,minTrackingConfidence:.5}),25000,`${delegate} 啟動逾時`);
-      AR.delegate=delegate; return AR.lm;
+      const base={modelAssetBuffer:AR.bufs[kind],delegate};
+      AR.lms[kind]=await withTimeout(kind==='neck'
+        ? PoseLandmarker.createFromOptions(files,{baseOptions:base,runningMode:'VIDEO',numPoses:1,
+            minPoseDetectionConfidence:.5,minPosePresenceConfidence:.5,minTrackingConfidence:.5})
+        : HandLandmarker.createFromOptions(files,{baseOptions:base,runningMode:'VIDEO',numHands:1,
+            minHandDetectionConfidence:.5,minHandPresenceConfidence:.5,minTrackingConfidence:.5}),25000,`${delegate} 啟動逾時`);
+      AR.delegates[kind]=AR.delegate=delegate; return AR.lm;
     }catch(e){ lastErr=e; console.warn('AR init',delegate,e); }
   }
   throw lastErr||new Error('model');
@@ -273,18 +291,18 @@ async function runCheck(){
   // 2. 模型
   let res=null, loadErr=null;
   if(!blocked){
-    const idx=checks.length; push('載入手部偵測模型','run','');
+    const idx=checks.length, lbl=`載入${K().label}偵測模型`; push(lbl,'run','');
     const t0=performance.now(), cached=!!AR.lm;
-    if(!cached) $('arSummary').textContent='第一次使用要下載約 17 MB 的 AR 元件，用行動網路可能要十幾秒。之後再開會快很多。';
+    if(!cached) $('arSummary').textContent=`第一次使用要下載約 ${K().mb} MB 的 AR 元件，用行動網路可能要十幾秒。之後再開會快很多。`;
     const clock=setInterval(()=>{ $('arBadge').textContent=`測試中 ${Math.round((performance.now()-t0)/1000)} 秒`; },500);
     try{
       await loadLandmarker(p=>{
         checks[idx].v=p.text; renderChecks(checks);
         $('arMeter').style.width=(p.stage==='download'?(p.total?60*p.loaded/p.total:2):65).toFixed(1)+'%';
       });
-      checks[idx]={k:'載入手部偵測模型',s:'ok',v:`${((performance.now()-t0)/1000).toFixed(1)} 秒・${AR.delegate==='GPU'?'GPU':'CPU（較慢）'}`};
+      checks[idx]={k:lbl,s:'ok',v:`${((performance.now()-t0)/1000).toFixed(1)} 秒・${AR.delegate==='GPU'?'GPU':'CPU（較慢）'}`};
     }
-    catch(e){ loadErr=e; checks[idx]={k:'載入手部偵測模型',s:'fail',v:/逾時|abort/i.test(String(e&&(e.message||e.name)))?'網路太慢或逾時':'載入失敗'}; console.warn('AR load',e); }
+    catch(e){ loadErr=e; checks[idx]={k:lbl,s:'fail',v:/逾時|abort/i.test(String(e&&(e.message||e.name)))?'網路太慢或逾時':'載入失敗'}; console.warn('AR load',e); }
     finally{ clearInterval(clock); $('arBadge').textContent='測試中'; }
     renderChecks(checks);
   }
@@ -321,6 +339,7 @@ async function runCheck(){
   if(res) lsSet({at:Date.now(),ua:navigator.userAgent,v,checks,fps:res.fps});
 }
 function openCheck(){
+  AR.kind=BS.design().type==='necklace'?'neck':'hand'; AR.delegate=AR.delegates[AR.kind]||'';
   $('arDlg').hidden=false;
   const prev=lsGet();
   if(prev&&prev.ua===navigator.userAgent&&Date.now()-prev.at<7*864e5){
@@ -328,8 +347,8 @@ function openCheck(){
     const back=['使用 3D 戴上看',closeDlg];
     if(prev.v[0]==='good'||prev.v[0]==='ok') setButtons([['先不要',closeDlg],['開始試戴',startAR,true]]);
     else setButtons([['仍要試試',startAR],[back[0],back[1],true]]);
-    $('arRetest').hidden=false; $('arDlgTitle').textContent='這支手機的檢查結果';
-  } else { $('arDlgTitle').textContent='檢查這支手機'; runCheck(); }
+    $('arRetest').hidden=false; $('arDlgTitle').textContent=(AR.kind==='neck'?'項鍊試戴・':'')+'這支手機的檢查結果';
+  } else { $('arDlgTitle').textContent=(AR.kind==='neck'?'項鍊試戴・':'')+'檢查這支手機'; runCheck(); }
 }
 $('arBtn').onclick=openCheck;
 $('arRetest').onclick=()=>{ $('arDlgTitle').textContent='檢查這支手機'; runCheck(); };
@@ -505,6 +524,12 @@ function initGl(){
   const idx=[]; for(let i=1;i<=G.occN;i++) idx.push(0,i,i+1); og.setIndex(idx);
   G.occ=new T.Mesh(og,new T.MeshBasicMaterial({colorWrite:false,depthWrite:true,side:T.DoubleSide}));
   G.occ.renderOrder=-1; G.occ.frustumCulled=false; G.scene.add(G.occ);
+  // 項鍊用：臉（下巴）的輪廓，同樣只寫入深度。低頭時擋住被下巴蓋到的那段項鍊
+  G.faceN=40; const fg=new T.BufferGeometry();
+  fg.setAttribute('position',new T.BufferAttribute(new Float32Array((G.faceN+2)*3),3));
+  const fi=[]; for(let i=1;i<=G.faceN;i++) fi.push(0,i,i+1); fg.setIndex(fi);
+  G.face=new T.Mesh(fg,new T.MeshBasicMaterial({colorWrite:false,depthWrite:true,side:T.DoubleSide}));
+  G.face.renderOrder=-1; G.face.frustumCulled=false; G.face.visible=false; G.scene.add(G.face);
   G.light=new T.Color(1,1,1);
 }
 function texFor(id,v){
@@ -579,6 +604,133 @@ function placeBracelet(pose,cam,cw,ch,scaleAdj,wristMM){
   const last=hl[0]; op.setXYZ(G.occN+1,last[0],-last[1],zc);
   op.needsUpdate=true;
 }
+
+/* ---------- 項鍊 AR ----------
+   1. 項鍊形狀：主程式在「戴上看」人模上做下垂模擬（人模設定的性別、頸圍、領口），這裡拿它算好的每個節點（mm）
+   2. 身體姿態：人體偵測的雙肩（11 左肩、12 右肩）
+      - 畫面上的肩線 → 左右方向和歪頭（roll）
+      - 3D 偵測點兩肩的前後差 → 身體左右轉（yaw）
+      - 肩寬的真實長度（偵測值和男女平均各半）÷ 畫面上的肩寬 → 離鏡頭多遠
+      人模的肩關節中點對到畫面上的雙肩中點；不同人肩膀高低不一樣，可用 ▲▼ 微調上下
+   3. 遮擋：每顆珠子往鏡頭方向走，碰到人模的身體（脖子）就藏起來 → 後頸那段看不到；
+      臉的輪廓（眼睛、嘴巴推出下巴）是看不見的遮擋片 → 低頭時下巴會蓋住項鍊 */
+const NECK={key:'',shape:null,items:[],lift:0,hidden:[],tick:0};
+const linkTexCache={};
+function linkTexture(tone){
+  tone=tone||['#57400f','#b48728','#f7e3a0','#d2a43f','#664711']; const k=tone.join(); if(linkTexCache[k]) return linkTexCache[k];
+  const c=document.createElement('canvas'); c.width=c.height=32; const x=c.getContext('2d');
+  const g=x.createLinearGradient(0,8,0,24); g.addColorStop(0,tone[2]); g.addColorStop(.5,tone[1]); g.addColorStop(1,tone[0]);
+  x.strokeStyle=g; x.lineWidth=5; x.beginPath(); x.ellipse(16,16,13,7,0,0,TAU); x.stroke();
+  const t=new THREE.CanvasTexture(c); t.encoding=THREE.sRGBEncoding; return linkTexCache[k]=t;
+}
+function buildNecklaceAR(){
+  const sh=BS.necklace?BS.necklace():null;
+  if(!sh){ NECK.shape=null; NECK.key=''; G.group.clear(); NECK.items=[]; return; }
+  if(sh.key===NECK.key&&NECK.shape) return;
+  NECK.key=sh.key; NECK.shape=sh; G.group.clear(); NECK.items=[]; NECK.cordBase=null; NECK.hidden=sh.nodes.map(()=>false);
+  sh.nodes.forEach((n,i)=>{
+    if(n.kind==='wire') return;
+    let map, mm;
+    if(n.kind==='chain'){ map=linkTexture(n.tone); mm=n.w*1.9; }
+    else { const t=texFor(n.id,n.v); if(!t) return; map=t.tex; mm=t.mm; }
+    const s=new THREE.Sprite(new THREE.SpriteMaterial({map,transparent:true,depthWrite:false})); s.userData={n,i,mm}; G.group.add(s); NECK.items.push(s);
+  });
+  const N=sh.nodes.length, g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(N*6),3));
+  const ch=sh.nodes.find(n=>n.kind==='chain');
+  NECK.cord=new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:ch&&ch.tone?ch.tone[1]:0xcfc3a8,transparent:true,opacity:.9}));
+  NECK.cord.frustumCulled=false; G.group.add(NECK.cord);
+}
+/* 從偵測點算出身體姿態（還沒平滑）：肩膀中點（螢幕 px）、距離 Z（公尺）、roll、yaw */
+function neckPoseRaw(lm,world,cam){
+  if((lm[11].visibility??1)<.3||(lm[12].visibility??1)<.3) return null;
+  const a=cam.toPx(lm[11]), b=cam.toPx(lm[12]), dx=a[0]-b[0], dy=a[1]-b[1], pw=Math.hypot(dx,dy);
+  if(pw<25) return null;
+  const wd=sub(W3(world[11]),W3(world[12])), wl=len(wd);
+  const yaw=Math.max(-.9,Math.min(.9,Math.atan2(wd[2]*Z_SIGN,Math.hypot(wd[0],wd[1])||1e-6)));
+  const avg=NECK.shape&&NECK.shape.sex==='m'?.37:.33;               // 肩膀關節點的間距，男女平均（公尺）
+  const Wr=Math.sqrt(avg*Math.max(.26,Math.min(.46,wl||avg)));      // 偵測值和平均值各半（幾何平均）
+  return {mx:(a[0]+b[0])/2,my:(a[1]+b[1])/2,Z:cam.f*Wr*Math.cos(yaw)/pw,roll:Math.atan2(dy,dx),yaw};
+}
+function neckPoseSmooth(r,t){
+  const p={mx:F('nmx',r.mx,t,1.4,.5),my:F('nmy',r.my,t,1.4,.5),Z:F('nz',r.Z,t,.6,.05),roll:F('nroll',r.roll,t,1,.3),yaw:F('nyaw',r.yaw,t,.8,.2)};
+  return p;
+}
+/* 人模座標（mm；x＝本人左手邊、y 上、z 朝前）→ 相機座標（公尺；x 右、y 下、z 遠） */
+function neckFrame(p,cam){
+  const O=[(p.mx-cam.ppx)*p.Z/cam.f,(p.my-cam.ppy)*p.Z/cam.f,p.Z];
+  const ux=Math.cos(p.roll), uy=Math.sin(p.roll), cy=Math.cos(p.yaw), sy=Math.sin(p.yaw);
+  const ex=[cy*ux,cy*uy,sy], ez=norm(cross(ex,[uy,-ux,0])), up=cross(ez,ex);
+  const sh=NECK.shape.shoulders, M=[(sh[0][0]+sh[1][0])/2,(sh[0][1]+sh[1][1])/2-NECK.lift,(sh[0][2]+sh[1][2])/2], k=AR.scale/1000;
+  const toCam=q=>{ const d=[q[0]-M[0],q[1]-M[1],q[2]-M[2]];
+    return [O[0]+(ex[0]*d[0]+up[0]*d[1]+ez[0]*d[2])*k, O[1]+(ex[1]*d[0]+up[1]*d[1]+ez[1]*d[2])*k, O[2]+(ex[2]*d[0]+up[2]*d[1]+ez[2]*d[2])*k]; };
+  const proj=C=>[cam.ppx+cam.f*C[0]/C[2], cam.ppy+cam.f*C[1]/C[2]];
+  return {O,ex,up,ez,toCam,proj};
+}
+/* 哪些節點被身體擋住：從節點往鏡頭走，路上碰到人模（含衣服）就是被擋住 */
+function neckOcclusion(fr){
+  const N=NECK.shape.nodes, f=NECK.shape.sdf;
+  N.forEach((n,i)=>{
+    const C=fr.toCam(n.p), dc=norm([-C[0],-C[1],-C[2]]);
+    const d=[dot(dc,fr.ex),dot(dc,fr.up),dot(dc,fr.ez)];
+    let t=n.r+2.5, hit=false;
+    for(let it=0;it<40&&t<260;it++){ const q=[n.p[0]+d[0]*t,n.p[1]+d[1]*t,n.p[2]+d[2]*t], v=f(q[0],q[1],q[2]);
+      if(v<.4){ hit=true; break; } t+=Math.max(v,1); }
+    NECK.hidden[i]=hit;
+  });
+}
+function placeNecklaceAR(p,cam,cw,ch){
+  G.cam.left=0; G.cam.right=cw; G.cam.top=0; G.cam.bottom=-ch; G.cam.updateProjectionMatrix();
+  const fr=neckFrame(p,cam), N=NECK.shape.nodes, sdf=NECK.shape.sdf, L=G.light;
+  if((NECK.tick++%2)===0) neckOcclusion(fr);
+  const pxPerMM=C=>AR.scale/1000*cam.f/C[2];
+  for(const s of NECK.items){
+    const {n,i,mm}=s.userData;
+    s.visible=!NECK.hidden[i]; if(!s.visible) continue;
+    let q=n.p;
+    if(n.kind==='pendant'){ const e=.6, gx=sdf(q[0]+e,q[1],q[2])-sdf(q[0]-e,q[1],q[2]), gz=sdf(q[0],q[1],q[2]+e)-sdf(q[0],q[1],q[2]-e), gl=Math.hypot(gx,gz)||1;
+      q=[q[0]+gx/gl*n.d*.18,q[1]-n.d/2,q[2]+gz/gl*n.d*.18]; }
+    const C=fr.toCam(q), P=fr.proj(C), size=mm*pxPerMM(C);
+    s.position.set(P[0],-P[1],-C[2]*1000); s.scale.set(size,size,1); s.material.color.copy(L);
+    if(n.kind==='chain'||n.kind==='clasp'||n.spacer){
+      const a=fr.proj(fr.toCam(N[(i-1+N.length)%N.length].p)), b=fr.proj(fr.toCam(N[(i+1)%N.length].p));
+      s.material.rotation=Math.atan2(-(b[1]-a[1]),b[0]-a[0])+(n.kind==='chain'&&i%2?Math.PI/2:0);
+    } else s.material.rotation=0;
+  }
+  const pos=NECK.cord.geometry.attributes.position;
+  for(let i=0;i<N.length;i++){
+    const j=(i+1)%N.length, A=fr.toCam(N[i].p), B=fr.toCam(N[j].p), pa=fr.proj(A), pb=fr.proj(B);
+    if(NECK.hidden[i]||NECK.hidden[j]){ pos.setXYZ(2*i,pa[0],-pa[1],-1e4); pos.setXYZ(2*i+1,pa[0],-pa[1],-1e4); continue; }
+    pos.setXYZ(2*i,pa[0],-pa[1],-A[2]*1000-1); pos.setXYZ(2*i+1,pb[0],-pb[1],-B[2]*1000-1);
+  }
+  pos.needsUpdate=true; NECK.cord.material.color.setRGB(L.r,L.g,L.b).multiply(NECK.cordBase||(NECK.cordBase=NECK.cord.material.color.clone()));
+  return fr;
+}
+/* 臉的輪廓：眼睛中點 → 嘴巴中點的方向往下延伸推出下巴；寬度用兩耳距離。放在比肩膀近 15 cm 的深度 */
+function placeFace(lm,cam,p){
+  const ok=[2,5,9,10,7,8].every(i=>(lm[i].visibility??1)>.4);
+  G.face.visible=ok; if(!ok){ NECK.faceOutline=null; return; }
+  const P=i=>cam.toPx(lm[i]), mid=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2];
+  const eye=mid(P(2),P(5)), mouth=mid(P(9),P(10)), dv=[mouth[0]-eye[0],mouth[1]-eye[1]], dl=Math.hypot(...dv)||1;
+  const chin=[mouth[0]+dv[0]*.85,mouth[1]+dv[1]*.85], ax=[dv[0]/dl,dv[1]/dl], nx=[-ax[1],ax[0]];
+  const half=dl*1.85*.62, wid=Math.hypot(P(7)[0]-P(8)[0],P(7)[1]-P(8)[1])/2*.8, c=[chin[0]-ax[0]*half,chin[1]-ax[1]*half];
+  const z=-(p.Z-.15)*1000, op=G.face.geometry.attributes.position, out=[];
+  op.setXYZ(0,c[0],-c[1],z);
+  for(let i=0;i<=G.faceN;i++){ const t=i/G.faceN*TAU, x=c[0]+ax[0]*Math.cos(t)*half+nx[0]*Math.sin(t)*wid, y=c[1]+ax[1]*Math.cos(t)*half+nx[1]*Math.sin(t)*wid;
+    op.setXYZ(i+1,x,-y,z); out.push([x,y]); }
+  op.needsUpdate=true; NECK.faceOutline=out; NECK.chin=chin;
+}
+const POSE_PTS=[0,2,5,7,8,9,10,11,12];
+function drawNeckSkeleton(lm,toPx,d,fr,cam){
+  const X=arCtx; X.lineWidth=3*d; X.strokeStyle='rgba(216,178,94,.9)';
+  const a=toPx(lm[11]), b=toPx(lm[12]); X.beginPath(); X.moveTo(a[0]*d,a[1]*d); X.lineTo(b[0]*d,b[1]*d); X.stroke();
+  POSE_PTS.forEach(i=>{ const [x,y]=toPx(lm[i]); X.fillStyle=i===11||i===12?'#ff6b5a':'#fff'; X.beginPath(); X.arc(x*d,y*d,(i>10?7:4)*d,0,TAU); X.fill(); });
+  if(NECK.faceOutline){ X.strokeStyle='rgba(120,200,255,.8)'; X.lineWidth=1.5*d; X.setLineDash([6*d,4*d]); X.beginPath();
+    NECK.faceOutline.forEach((p,i)=>i?X.lineTo(p[0]*d,p[1]*d):X.moveTo(p[0]*d,p[1]*d)); X.closePath(); X.stroke(); X.setLineDash([]);
+    X.fillStyle='#7cc8ff'; X.beginPath(); X.arc(NECK.chin[0]*d,NECK.chin[1]*d,5*d,0,TAU); X.fill(); }
+  if(fr){ // 人模的脖子位置（紫）：確認上下有沒有對準
+    const sh=NECK.shape, P=q=>fr.proj(fr.toCam(q)); X.strokeStyle='rgba(230,90,230,.85)'; X.lineWidth=2*d; X.beginPath();
+    for(let i=0;i<=24;i++){ const t=i/24*TAU, r=sh.neckCM*10/TAU, q=P([Math.sin(t)*r,30,Math.cos(t)*r-6]); i?X.lineTo(q[0]*d,q[1]*d):X.moveTo(q[0]*d,q[1]*d); } X.stroke(); }
+}
 /* 亮度：每半秒取相機畫面的平均亮度和色偏，乘到珠子上，暗的房間珠子不會亮得突兀 */
 const lumCv=document.createElement('canvas'); lumCv.width=lumCv.height=16; const lumCtx=lumCv.getContext('2d',{willReadFrequently:true});
 function sampleLight(now){
@@ -604,6 +756,12 @@ async function openCamera(){
 }
 async function startAR(){
   $('arDlg').hidden=true; $('arView').hidden=false; $('arShot').hidden=true; BS.setPaused(true); arMsg('');
+  if(AR.facingKind!==AR.kind){ AR.facing=K().facing; AR.facingKind=AR.kind; }
+  const neck=AR.kind==='neck';
+  $('arGuide').textContent=K().guide; $('arGuide').classList.toggle('wide',neck);
+  $('arUp').hidden=$('arDown').hidden=$('arLiftLbl').hidden=!neck;
+  $('arBig').setAttribute('aria-label',neck?'項鍊放大':'手鍊放大'); $('arSmall').setAttribute('aria-label',neck?'項鍊縮小':'手鍊縮小');
+  $('arSkel').title=neck?'顯示人體偵測點':'顯示手部偵測點';
   $('arHudL').textContent='開啟相機…'; $('arHudR').textContent='';
   const token=AR.session=(AR.session||0)+1;
   // 先開相機，讓使用者馬上看到畫面；AR 元件同時在背景載入
@@ -616,9 +774,11 @@ async function startAR(){
       if(token!==AR.session) return;
       const pct=p.stage==='download'&&p.total?Math.min(99,Math.round(100*p.loaded/p.total)):p.stage==='init'?99:0;
       $('arHudL').textContent=p.text==='連線中'?'準備 AR 元件…':p.text;
-      if(loading) arMsg(p.stage==='init'?'即將完成…':`載入 AR 元件 ${pct}%\n第一次使用要下載約 17 MB，之後就不用再等`);
+      if(loading) arMsg(p.stage==='init'?'即將完成…':`載入 AR 元件 ${pct}%\n第一次使用要下載約 ${K().mb} MB，之後就不用再等`);
     });
-    initGl(); buildBracelet();
+    initGl();
+    if(G.kindBuilt!==AR.kind){ G.key=''; NECK.key=''; G.group.clear(); G.kindBuilt=AR.kind; }
+    if(AR.kind==='neck'){ arMsg('計算項鍊形狀…'); await sleep(30); buildNecklaceAR(); } else buildBracelet();
   }catch(e){ err=e; }
   const camErr=await cam;
   if(token!==AR.session||$('arView').hidden){            // 使用者已經關掉了：相機若剛打開也要關
@@ -637,7 +797,7 @@ async function startAR(){
     return;
   }
   arMsg(''); $('arGuide').hidden=false;
-  if(!G.layout) arMsg('盤中還沒有珠子。先回去設計一條，再來試戴。');
+  if(AR.kind==='neck'?!NECK.shape:!G.layout) arMsg(AR.kind==='neck'?'還沒有設計項鍊。先回去設計一條，再來試戴。':'盤中還沒有珠子。先回去設計一條，再來試戴。');
   AR.running=true; AR.fps=[]; AR.lastSeen=0; requestAnimationFrame(arLoop);
 }
 function stopAR(){
@@ -659,6 +819,11 @@ function arLoop(now){
     // pinhole camera in CSS px: principal point = video centre, focal length from a typical phone FOV
     const cam={toPx, sc, ppx:ox+vw*sc/2, ppy:oy+vh*sc/2, f:Math.max(vw,vh)*sc/(2*Math.tan(HFOV/2))};
     arCtx.clearRect(0,0,arCv.width,arCv.height);
+    if(AR.kind==='neck'){ neckFrameStep(res,cam,now,cw,ch,d,toPx); G.r.render(G.scene,G.cam);
+      AR.fps.push(now); while(AR.fps.length&&now-AR.fps[0]>1000) AR.fps.shift();
+      $('arHudL').innerHTML=`<b>${AR.fps.length}</b> 格/秒・偵測 ${dt.toFixed(0)} ms・${AR.delegate}`;
+      requestAnimationFrame(arLoop); return; }
+    G.face.visible=false;
     const hand=res.landmarks&&res.landmarks[0], world=res.worldLandmarks&&res.worldLandmarks[0];
     $('arGuide').hidden=!!hand;
     if(hand&&world){
@@ -695,6 +860,24 @@ function arLoop(now){
   }
   requestAnimationFrame(arLoop);
 }
+function neckFrameStep(res,cam,now,cw,ch,d,toPx){
+  const lm=res.landmarks&&res.landmarks[0], world=res.worldLandmarks&&res.worldLandmarks[0];
+  G.occ.visible=false;
+  const raw=lm&&world&&NECK.shape?neckPoseRaw(lm,world,cam):null;
+  $('arGuide').hidden=!!raw;
+  if(raw){
+    AR.lastSeen=now; sampleLight(now);
+    const p=neckPoseSmooth(raw,now), fr=placeNecklaceAR(p,cam,cw,ch); placeFace(lm,cam,p); G.group.visible=true;
+    if(AR.skel) drawNeckSkeleton(lm,toPx,d,fr,cam);
+    $('arHudR').textContent=AR.skel?`轉身 ${Math.round(p.yaw*180/Math.PI)}°・距離 ${Math.round(p.Z*100)} cm`:'';
+  } else {
+    $('arHudR').textContent=NECK.shape?K().lost:'';
+    if(now-AR.lastSeen>350){ G.group.visible=G.face.visible=false; resetFilters(); }
+  }
+}
+function setLift(x){ NECK.lift=Math.max(-60,Math.min(60,x)); $('arLiftLbl').textContent=(NECK.lift>0?'+':'')+NECK.lift; }
+$('arUp').onclick=()=>setLift(NECK.lift+5);
+$('arDown').onclick=()=>setLift(NECK.lift-5);
 function setScale(x){ AR.scale=Math.max(.7,Math.min(1.4,Math.round(x*20)/20)); $('arScaleLbl').textContent=Math.round(AR.scale*100)+'%'; }
 $('arBig').onclick=()=>setScale(AR.scale+.05);
 $('arSmall').onclick=()=>setScale(AR.scale-.05);

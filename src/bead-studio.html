@@ -1230,7 +1230,7 @@ function linkTex(tone){ const k=tone[2]; if(linkTexCache[k]) return linkTexCache
   const c=document.createElement('canvas'); c.width=c.height=32; const x=c.getContext('2d'); x.strokeStyle=metalGrad(x,0,8,0,24,tone); x.lineWidth=5; x.beginPath(); x.ellipse(16,16,13,7,0,0,TAU); x.stroke();
   const t=new W3.T3.CanvasTexture(c); t.encoding=W3.T3.sRGBEncoding; return linkTexCache[k]=t; }
 function buildNecklaceSprites(){
-  const T3=W3.T3; BU.necklace.clear(); NS.sprites=[];
+  const T3=W3.T3; BU.necklace.clear(); NS.sprites=[]; NS.needSprites=false;
   for(const n of NS.nodes){
     let mat;
     if(n.kind==='wire') continue;
@@ -1262,7 +1262,7 @@ function renderBust(){
   if(bustStale()&&!BU.pending){ BU.pending=true; w3msg.hidden=false; w3msg.textContent='建立人模中…'; if(BU.group) W3.r.render(W3.scene,W3.camera); return; }
   BU.pending=false;
   const t0=performance.now(); if(buildBust()) BU.buildMs=performance.now()-t0; BU.group.visible=true;
-  const k=necklaceKey(); if(k!==NS.key){ NS.key=k; initNecklace(); buildNecklaceSprites(); }
+  const k=necklaceKey(); if(k!==NS.key){ NS.key=k; initNecklace(); buildNecklaceSprites(); } else if(NS.needSprites) buildNecklaceSprites();
   simNecklace(reduceMotion?700:40);
   view.yaw+=(view.yawT-view.yaw)*(reduceMotion?1:.14);
   BU.group.rotation.y=view.yaw;
@@ -1713,6 +1713,19 @@ const BeadStudio = window.BeadStudio = {
   design(){ return { type:TYPE, wristMM:wristMM(), beads:seq.map(s=>{ const it=CAT[s.id]; return {uid:s.uid,id:s.id,kind:it.kind,d:it.d,w:it.w,v:s.v,gw:gw(s.uid)}; }) }; },
   // bead picture (photo or drawn) as a canvas; mm = real width the canvas covers
   beadImage(id,v=0){ const it=CAT[id]; if(!it) return null; const sp=sprite(it,12,v); return {canvas:sp.cv,mm:sp.half*2/12}; },
+  // necklace hanging on the mannequin (人模設定 = sex, neck size, neckline), fully settled; mm, mannequin axes:
+  // x = wearer's left, y = up, z = forward. sdf(x,y,z) = body (+ clothes) surface, negative inside.
+  // shoulders = shoulder-joint centres [left, right]; null for bracelets or an empty design
+  necklace(){
+    if(!isNeck()||(!seq.length&&!NK.chain)) return null;
+    const k=necklaceKey(); if(k!==NS.key){ NS.key=k; initNecklace(); NS.needSprites=true; }
+    while(simNecklace(200));
+    const P=bustParams();
+    return { key:k, sex:MB.sex, neckCM:MB.neckCM, neckline:MB.neckline, sdf:NS.csdf,
+      shoulders:[[P.sh-38,-48,-6],[-(P.sh-38),-48,-6]],
+      nodes:NS.nodes.map(n=>({p:n.p.slice(),w:n.w,r:n.r,kind:n.kind,id:n.it?n.it.id:null,v:n.v||0,d:n.it?n.it.d:0,
+        spacer:!!(n.it&&n.it.kind==='spacer'),tone:n.it&&n.it.tone?n.it.tone:null})) };
+  },
 };
 setMode('dish'); refresh();
 requestAnimationFrame(frame);
